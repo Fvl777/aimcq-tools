@@ -1302,35 +1302,41 @@ var CSS_DEPS = [
   ['https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css', 'cropper']
 ];
 
-/* Generic helper: append a CDN <link rel="stylesheet"> exactly once. */
-function loadCDNStyle(href, mark){
+function ensureCSS(href, mark, cb){
   var links = document.getElementsByTagName('link'), i;
-  for(i=0;i<links.length;i++){ if((links[i].href||'').indexOf(href) > -1) return; }
+  for(i=0;i<links.length;i++){
+    if((links[i].href||'').indexOf(href) > -1){
+      // Already present — still resolve cb once it's loaded (or right away if it is).
+      if(cb){
+        var ln = links[i];
+        if(ln.sheet){ cb(); }
+        else { ln.addEventListener('load', cb); ln.addEventListener('error', cb); }
+      }
+      return;
+    }
+  }
   var l = document.createElement('link');
   l.rel = 'stylesheet';
   l.href = href;
   if(mark) l.setAttribute('data-mcqs-css', mark);
+  if(cb){ l.addEventListener('load', cb); l.addEventListener('error', cb); }
   document.head.appendChild(l);
 }
 
-/* Auto-load THIS tool's own stylesheet (mcqs.css) from the same CDN folder as
- * this script — modelled directly on the Smartboard tool's ensureCSS(). The
- * folder comes from BASE (derived from document.currentScript above), so a
- * single
- *     <script src="https://cdn.jsdelivr.net/gh/USER/REPO@TAG/mcqs.js"></script>
- * pulls mcqs.css from the same place with no extra <link> tag. Safe to call
- * repeatedly: guarded by the data-mcqs-css="self" marker and an href scan. */
-function ensureCSS(){
-  if(!BASE) return;
-  var href = BASE + 'mcqs.css';
-  if(document.querySelector('link[data-mcqs-css="self"]')) return;
-  var links = document.getElementsByTagName('link'), i;
-  for(i=0;i<links.length;i++){ if((links[i].href||'').indexOf('mcqs.css') > -1) return; }
-  var l = document.createElement('link');
-  l.rel = 'stylesheet';
-  l.href = href;
-  l.setAttribute('data-mcqs-css', 'self');
-  document.head.appendChild(l);
+// Synchronously inject a tiny guard stylesheet that hides the tool until its
+// real styles (mcqs.css + Tailwind) are ready. This <style> does NOT depend on
+// any external file, so the "hidden" state applies before the first paint and
+// the user never sees a flash of unstyled markup (FOUC). Reserving min-height
+// + background also prevents a layout jump while the host is empty.
+function injectGuardStyle(){
+  if(document.getElementById('mcqs-guard-style')) return;
+  var st = document.createElement('style');
+  st.id = 'mcqs-guard-style';
+  st.textContent =
+    '.mcqs-embed{min-height:480px;background-color:#f3f4f6;}' +
+    '.mcqs-embed .mcqs-app-root{opacity:0;}' +
+    '.mcqs-embed.mcqs-ready .mcqs-app-root{opacity:1;transition:opacity .18s ease;}';
+  (document.head || document.documentElement).appendChild(st);
 }
 
 function loadScript(src, opts){
@@ -1374,8 +1380,8 @@ function loadScript(src, opts){
 }
 
 function loadDeps(){
-  // Third-party stylesheets (KaTeX + Cropper) — order irrelevant.
-  CSS_DEPS.forEach(function(d){ loadCDNStyle(d[0], d[1]); });
+  // Stylesheets — order irrelevant.
+  CSS_DEPS.forEach(function(d){ ensureCSS(d[0], d[1]); });
 
   // Independent libraries load in parallel; KaTeX core precedes auto-render.
   return Promise.all([
@@ -1419,39 +1425,54 @@ function mount(){
   host.classList.add('mcqs-embed');
   applyHeight(host);
 
-  // Auto-load our own stylesheet from the same CDN folder as this script
-  // (idempotent; also called up-front by init() below).
-  ensureCSS();
+  // Hide the tool until its styles are ready so there is no flash of unstyled
+  // markup. The guard <style> is injected synchronously (before innerHTML), so
+  // the hidden state is in effect before the browser paints anything.
+  injectGuardStyle();
 
-  // Inject the tool markup (synchronous) BEFORE the application loads.
+  var revealed = false;
+  function reveal(){
+    if(revealed) return;
+    revealed = true;
+    host.classList.add('mcqs-ready');     // fades the tool in (guard stylesheet)
+  }
+
+  var cssReady = false, libsReady = false;
+  function maybeReveal(){
+    if(!(cssReady && libsReady)) return;
+    // Two animation frames give Tailwind's runtime time to inject the styles it
+    // generates for the freshly-added markup before we fade the tool in.
+    requestAnimationFrame(function(){ requestAnimationFrame(reveal); });
+  }
+
+  // Safety net: never leave the tool hidden if a CDN is slow or blocked.
+  setTimeout(reveal, 2500);
+
+  // Auto-load our own stylesheet from the same CDN folder as this script, and
+  // wait for it before revealing.
+  if(BASE){ ensureCSS(BASE + 'mcqs.css', 'self', function(){ cssReady = true; maybeReveal(); }); }
+  else { cssReady = true; }
+
+  // Inject the tool markup (synchronous) — hidden by the guard style above.
   host.innerHTML = '<div class="mcqs-app-root">' + MARKUP + '</div>';
 
-  // Load third-party deps, THEN the application. The app is loaded last and
-  // as a real <script>, so (a) its top-level PDF.js / Lucide setup sees the
-  // libraries already present, and (b) its on* handler functions register as
-  // globals for the inline handlers in the markup.
+  // Load third-party deps, THEN the application. Revealing waits on the deps
+  // (Tailwind in particular) so the layout is correct on the first visible paint.
   loadDeps().then(function(){
     if(BASE){ loadScript(BASE + 'mcqs.app.js'); }
     else { console.error('[MCQsTool] Could not resolve script BASE url; load mcqs.js from a real URL.'); }
+    libsReady = true;
+    maybeReveal();
   });
 }
 
-// Entry point — load the tool's CSS from the CDN up front (exactly like the
-// Smartboard tool's init() does with ensureCSS()), then mount the host.
-function init(){
-  ensureCSS();
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', mount);
+} else {
   mount();
 }
 
-if(document.readyState === 'loading'){
-  document.addEventListener('DOMContentLoaded', init);
-} else {
-  init();
-}
-
-// Optional manual entry points.
+// Optional manual entry point.
 window.MCQsTool = window.MCQsTool || {};
-window.MCQsTool.ensureCSS = ensureCSS;
 window.MCQsTool.mount = mount;
-window.MCQsTool.init = init;
 })();
