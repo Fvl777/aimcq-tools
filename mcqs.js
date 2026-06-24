@@ -1302,13 +1302,34 @@ var CSS_DEPS = [
   ['https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css', 'cropper']
 ];
 
-function ensureCSS(href, mark){
+/* Generic helper: append a CDN <link rel="stylesheet"> exactly once. */
+function loadCDNStyle(href, mark){
   var links = document.getElementsByTagName('link'), i;
   for(i=0;i<links.length;i++){ if((links[i].href||'').indexOf(href) > -1) return; }
   var l = document.createElement('link');
   l.rel = 'stylesheet';
   l.href = href;
   if(mark) l.setAttribute('data-mcqs-css', mark);
+  document.head.appendChild(l);
+}
+
+/* Auto-load THIS tool's own stylesheet (mcqs.css) from the same CDN folder as
+ * this script — modelled directly on the Smartboard tool's ensureCSS(). The
+ * folder comes from BASE (derived from document.currentScript above), so a
+ * single
+ *     <script src="https://cdn.jsdelivr.net/gh/USER/REPO@TAG/mcqs.js"></script>
+ * pulls mcqs.css from the same place with no extra <link> tag. Safe to call
+ * repeatedly: guarded by the data-mcqs-css="self" marker and an href scan. */
+function ensureCSS(){
+  if(!BASE) return;
+  var href = BASE + 'mcqs.css';
+  if(document.querySelector('link[data-mcqs-css="self"]')) return;
+  var links = document.getElementsByTagName('link'), i;
+  for(i=0;i<links.length;i++){ if((links[i].href||'').indexOf('mcqs.css') > -1) return; }
+  var l = document.createElement('link');
+  l.rel = 'stylesheet';
+  l.href = href;
+  l.setAttribute('data-mcqs-css', 'self');
   document.head.appendChild(l);
 }
 
@@ -1353,8 +1374,8 @@ function loadScript(src, opts){
 }
 
 function loadDeps(){
-  // Stylesheets — order irrelevant.
-  CSS_DEPS.forEach(function(d){ ensureCSS(d[0], d[1]); });
+  // Third-party stylesheets (KaTeX + Cropper) — order irrelevant.
+  CSS_DEPS.forEach(function(d){ loadCDNStyle(d[0], d[1]); });
 
   // Independent libraries load in parallel; KaTeX core precedes auto-render.
   return Promise.all([
@@ -1398,8 +1419,9 @@ function mount(){
   host.classList.add('mcqs-embed');
   applyHeight(host);
 
-  // Auto-load our own stylesheet from the same CDN folder as this script.
-  if(BASE) ensureCSS(BASE + 'mcqs.css', 'self');
+  // Auto-load our own stylesheet from the same CDN folder as this script
+  // (idempotent; also called up-front by init() below).
+  ensureCSS();
 
   // Inject the tool markup (synchronous) BEFORE the application loads.
   host.innerHTML = '<div class="mcqs-app-root">' + MARKUP + '</div>';
@@ -1414,13 +1436,22 @@ function mount(){
   });
 }
 
-if(document.readyState === 'loading'){
-  document.addEventListener('DOMContentLoaded', mount);
-} else {
+// Entry point — load the tool's CSS from the CDN up front (exactly like the
+// Smartboard tool's init() does with ensureCSS()), then mount the host.
+function init(){
+  ensureCSS();
   mount();
 }
 
-// Optional manual entry point.
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+
+// Optional manual entry points.
 window.MCQsTool = window.MCQsTool || {};
+window.MCQsTool.ensureCSS = ensureCSS;
 window.MCQsTool.mount = mount;
+window.MCQsTool.init = init;
 })();
