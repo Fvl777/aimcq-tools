@@ -15,6 +15,16 @@ That single `mcqs.js` automatically loads `mcqs.css` and `mcqs.app.js` from the
 same folder, plus the third-party libraries the tool needs (Tailwind, JSZip,
 Lucide, KaTeX, PDF.js, Cropper). You do **not** add any other `<link>`/`<script>`.
 
+### How the CSS is loaded (same as the Smartboard tool)
+
+`mcqs.js` finds itself via `document.currentScript`, derives its CDN folder
+(`BASE`), and an `ensureCSS()` function appends
+`<link rel="stylesheet" href="BASE + mcqs.css">` to the page `<head>` — exactly
+like the Smartboard tool's `ensureCSS()`. It runs up-front in `init()`, is
+guarded against duplicates (`data-mcqs-css="self"` + href scan), so the
+stylesheet is pulled from the CDN with no manual `<link>` tag. The KaTeX and
+Cropper stylesheets the tool needs are loaded the same way.
+
 ## Files to host
 
 | File          | Role                                                                 |
