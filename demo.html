@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI MCQs JSON Tool — embed demo</title>
+  <style>
+    /* This is the *host page's* own styling — proves the tool no longer
+       hijacks the page body. */
+    body{ margin:0; font-family:system-ui,sans-serif; background:#0f172a; color:#e2e8f0; }
+    .page-head{ padding:18px 22px; }
+    .page-head h1{ margin:0 0 4px; font-size:18px; }
+    .page-head p{ margin:0; font-size:13px; color:#94a3b8; }
+  </style>
+</head>
+<body>
+
+  <div class="page-head">
+    <h1>My website</h1>
+    <p>Everything below the line is the embedded AI MCQs JSON Tool.</p>
+  </div>
+  <hr style="border:none;border-top:1px solid #334155;margin:0">
+
+  <!-- ===== THE EMBED ===== -->
+  <div class="smartboard-page-wrap">
+    <div data-height="100vh" id="smartboard-host"></div>
+  </div>
+
+  <!-- For local testing this points at the sibling file.
+       On your site, replace with the jsDelivr URL (see README):
+       <script src="https://cdn.jsdelivr.net/gh/USER/REPO@TAG/mcqs.js"></script> -->
+  <script src="./mcqs.js"></script>
+  <!-- ===================== -->
+
+</body>
+</html>
