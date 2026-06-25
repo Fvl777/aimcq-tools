@@ -132,7 +132,7 @@ const COLORS = ['#6366f1','#f59e0b','#10b981','#ef4444','#8b5cf6','#06b6d4','#f9
 
 // ==================== UTILITIES ====================
 function downloadJSON(data, filename) {
-    const blob = new Blob([JSON.stringify(data, null, 4)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(aimcqCanonicalizeExport(data), null, 4)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = filename;
@@ -142,6 +142,89 @@ function downloadJSON(data, filename) {
 
 function isValidAimcqJSON(data) {
     return data && typeof data === 'object' && Array.isArray(data.posts);
+}
+
+/* ====================================================================
+   STANDARD AIMCQ EXPORT SHAPE (canonicalization)
+   --------------------------------------------------------------------
+   Inputs may carry EXTRA tags (e.g. `_aimcq_seo_robots`) and keys in any
+   order — those are accepted on import and kept in memory so every tool
+   keeps working. But every JSON we EXPORT (download, GitHub commit, ZIP,
+   live/inline preview) is run through these helpers so the output matches
+   the agreed standard format EXACTLY: a fixed key order, only the known
+   keys, and nothing extra. This is applied uniformly across Split,
+   Combine, Quiz/Frontend Builder, Question Editor and Figure Updater.
+   ==================================================================== */
+var AIMCQ_POST_KEY_ORDER = [
+    'id', 'post_author', 'post_date', 'post_title', 'post_content',
+    'post_status', 'post_type', 'meta_input', 'taxonomies', 'embedded_media'
+];
+var AIMCQ_META_KEY_ORDER = [
+    '_aimcq_options', '_aimcq_explanation', '_aimcq_title_hi',
+    '_aimcq_question_content_hi', '_aimcq_options_hi',
+    '_aimcq_correct_answers', '_aimcq_explanation_hi'
+];
+
+// One option object → exactly { text, image } in that order (extras dropped).
+function aimcqCanonicalizeOption(opt) {
+    if (!opt || typeof opt !== 'object') return { text: '', image: '' };
+    return {
+        text: opt.text != null ? opt.text : '',
+        image: opt.image != null ? opt.image : ''
+    };
+}
+
+// meta_input → only the known keys, in the standard order. Drops extras
+// such as `_aimcq_seo_robots`.
+function aimcqCanonicalizeMeta(meta) {
+    meta = (meta && typeof meta === 'object') ? meta : {};
+    return {
+        _aimcq_options: Array.isArray(meta._aimcq_options)
+            ? meta._aimcq_options.map(aimcqCanonicalizeOption) : [],
+        _aimcq_explanation: meta._aimcq_explanation != null ? meta._aimcq_explanation : '',
+        _aimcq_title_hi: meta._aimcq_title_hi != null ? meta._aimcq_title_hi : '',
+        _aimcq_question_content_hi: meta._aimcq_question_content_hi != null ? meta._aimcq_question_content_hi : '',
+        _aimcq_options_hi: Array.isArray(meta._aimcq_options_hi)
+            ? meta._aimcq_options_hi.map(aimcqCanonicalizeOption) : [],
+        _aimcq_correct_answers: Array.isArray(meta._aimcq_correct_answers)
+            ? meta._aimcq_correct_answers.map(Number) : [0],
+        _aimcq_explanation_hi: meta._aimcq_explanation_hi != null ? meta._aimcq_explanation_hi : ''
+    };
+}
+
+// One post → standard key order, only the known keys (extras dropped).
+function aimcqCanonicalizePost(post) {
+    if (!post || typeof post !== 'object') return post;
+    var out = {};
+    if ('id' in post) out.id = post.id;
+    out.post_author  = post.post_author != null ? post.post_author : 1;
+    out.post_date    = post.post_date != null ? post.post_date : '';
+    out.post_title   = post.post_title != null ? post.post_title : '';
+    out.post_content = post.post_content != null ? post.post_content : '';
+    out.post_status  = post.post_status != null ? post.post_status : 'publish';
+    out.post_type    = post.post_type != null ? post.post_type : 'question';
+    out.meta_input   = aimcqCanonicalizeMeta(post.meta_input);
+    out.taxonomies   = (post.taxonomies && typeof post.taxonomies === 'object') ? post.taxonomies : {};
+    out.embedded_media = Array.isArray(post.embedded_media) ? post.embedded_media : [];
+    return out;
+}
+
+// Full export object → canonical. Leaves non-aimcq shapes untouched, and
+// preserves the wrapper keys (version, export_type, terms) plus any extra
+// top-level keys (e.g. quiz_title) after `posts`.
+function aimcqCanonicalizeExport(data) {
+    if (!data || typeof data !== 'object' || !Array.isArray(data.posts)) return data;
+    var out = {};
+    if ('version' in data) out.version = data.version;
+    if ('export_type' in data) out.export_type = data.export_type;
+    if ('terms' in data) out.terms = data.terms;
+    out.posts = data.posts.map(aimcqCanonicalizePost);
+    Object.keys(data).forEach(function (k) {
+        if (k !== 'version' && k !== 'export_type' && k !== 'terms' && k !== 'posts' && !(k in out)) {
+            out[k] = data[k];
+        }
+    });
+    return out;
 }
 
 function stripHtmlTags(str) {
@@ -250,7 +333,7 @@ document.getElementById('btn-download-all').addEventListener('click', async () =
     btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Zipping...`; lucide.createIcons();
     try {
         const zip = new JSZip();
-        generatedSplitChunks.forEach(c => zip.file(c.filename, JSON.stringify(c.data, null, 4)));
+        generatedSplitChunks.forEach(c => zip.file(c.filename, JSON.stringify(aimcqCanonicalizeExport(c.data), null, 4)));
         const blob = await zip.generateAsync({ type: "blob" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url;
@@ -521,8 +604,10 @@ function updateLiveJsonPreview() {
     const previewEl = document.getElementById('base-live-json-preview');
     const metaEl = document.getElementById('live-json-meta');
     metaEl.textContent = `${previewData.posts.length} questions · ${editorDeleteSet.size} deleted · ${importedPosts.length} imported`;
-    // Show summary of first ~3 posts + ellipsis to avoid giant DOM
-    const summarized = { ...previewData, posts: previewData.posts.slice(0, 3) };
+    // Show summary of first ~3 posts + ellipsis to avoid giant DOM.
+    // Canonicalize so the preview matches the exported file exactly.
+    const canonicalPreview = aimcqCanonicalizeExport(previewData);
+    const summarized = { ...canonicalPreview, posts: canonicalPreview.posts.slice(0, 3) };
     let jsonStr = JSON.stringify(summarized, null, 2);
     if (previewData.posts.length > 3) {
         jsonStr = jsonStr.replace(/\](\s*)$/, `  // ...${previewData.posts.length - 3} more questions\n]$1`);
@@ -4004,7 +4089,7 @@ async function ghCommitJsonFile(file, dataObj, commitMessage) {
         throw new Error('A GitHub token is required to commit. Open the GitHub picker ' +
             'and enter a Personal Access Token (repo scope).');
     }
-    const json = JSON.stringify(dataObj, null, 2);
+    const json = JSON.stringify(aimcqCanonicalizeExport(dataObj), null, 2);
     // base64-encode the UTF-8 content (handles Hindi and all Unicode).
     const bytes = new TextEncoder().encode(json);
     let bin = '';
@@ -4935,13 +5020,13 @@ function fbCopy(which) {
             ? editorExportData
             : (typeof editorBaseData !== 'undefined' ? editorBaseData : null);
         if (!d) { showToast('No JSON', 'Load a file in the JSON Editor tab first.', 'error'); return; }
-        inlineTa.value = JSON.stringify(d, null, 2);
+        inlineTa.value = JSON.stringify(aimcqCanonicalizeExport(d), null, 2);
         inlineTa.dispatchEvent(new Event('input'));
     });
     const useFigures = document.getElementById('fb-inline-use-figures');
     if (useFigures) useFigures.addEventListener('click', () => {
         if (!figState.data) { showToast('No JSON', 'Load a file in the Figure Updater tab first.', 'error'); return; }
-        inlineTa.value = JSON.stringify(figState.data, null, 2);
+        inlineTa.value = JSON.stringify(aimcqCanonicalizeExport(figState.data), null, 2);
         inlineTa.dispatchEvent(new Event('input'));
     });
     const fmtBtn = document.getElementById('fb-inline-format');
