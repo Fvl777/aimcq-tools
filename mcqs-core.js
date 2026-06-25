@@ -174,38 +174,231 @@ function aimcqCanonicalizeOption(opt) {
     };
 }
 
+// Which language is the PRIMARY one (its content lives in the base fields:
+// post_title, post_content, _aimcq_options, _aimcq_explanation).
+var AIMCQ_PRIMARY_LANG = 'EN';
+// SECONDARY languages keep their content in suffixed translation fields.
+// Map: language code → { base field : its translation field }. When a quiz
+// is reduced to a single SECONDARY language, that language's content is
+// promoted into the base fields. Add future secondary languages here.
+var AIMCQ_SECONDARY_FIELDS = {
+    HI: {
+        post_title:         '_aimcq_title_hi',
+        post_content:       '_aimcq_question_content_hi',
+        _aimcq_options:     '_aimcq_options_hi',
+        _aimcq_explanation: '_aimcq_explanation_hi'
+    }
+};
+
+// Whether to keep the Hindi translation fields (`_aimcq_*_hi`).
+// They only belong in a BILINGUAL quiz (English primary + Hindi secondary),
+// i.e. more than one language AND Hindi present. A single-language quiz
+// (01EN or 01HI) carries its text in the primary fields only, with no
+// translation fields. With no language info we keep them (safe default).
+function aimcqMetaKeepHindi(langCodes) {
+    if (!Array.isArray(langCodes)) return true;
+    return langCodes.length > 1 && langCodes.indexOf('HI') !== -1;
+}
+
+function aimcqHasText(v) { return v != null && String(v).trim() !== ''; }
+
 // meta_input → only the known keys, in the standard order. Drops extras
-// such as `_aimcq_seo_robots`.
-function aimcqCanonicalizeMeta(meta) {
+// such as `_aimcq_seo_robots`. For single-language quizzes the Hindi
+// translation fields are omitted entirely (see aimcqMetaKeepHindi). When
+// `promoteLang` names a secondary language (e.g. 'HI'), its translation
+// content is promoted into the base options/explanation before the
+// translation fields are dropped.
+function aimcqCanonicalizeMeta(meta, langCodes, promoteLang) {
     meta = (meta && typeof meta === 'object') ? meta : {};
-    return {
-        _aimcq_options: Array.isArray(meta._aimcq_options)
-            ? meta._aimcq_options.map(aimcqCanonicalizeOption) : [],
-        _aimcq_explanation: meta._aimcq_explanation != null ? meta._aimcq_explanation : '',
-        _aimcq_title_hi: meta._aimcq_title_hi != null ? meta._aimcq_title_hi : '',
-        _aimcq_question_content_hi: meta._aimcq_question_content_hi != null ? meta._aimcq_question_content_hi : '',
-        _aimcq_options_hi: Array.isArray(meta._aimcq_options_hi)
-            ? meta._aimcq_options_hi.map(aimcqCanonicalizeOption) : [],
-        _aimcq_correct_answers: Array.isArray(meta._aimcq_correct_answers)
-            ? meta._aimcq_correct_answers.map(Number) : [0],
-        _aimcq_explanation_hi: meta._aimcq_explanation_hi != null ? meta._aimcq_explanation_hi : ''
-    };
+    var keepHi = aimcqMetaKeepHindi(langCodes);
+    var map = promoteLang ? AIMCQ_SECONDARY_FIELDS[promoteLang] : null;
+    var out = {};
+
+    var optsSrc = (map && Array.isArray(meta[map._aimcq_options]) && meta[map._aimcq_options].length)
+        ? meta[map._aimcq_options] : meta._aimcq_options;
+    out._aimcq_options = Array.isArray(optsSrc) ? optsSrc.map(aimcqCanonicalizeOption) : [];
+
+    var explSrc = (map && aimcqHasText(meta[map._aimcq_explanation]))
+        ? meta[map._aimcq_explanation] : meta._aimcq_explanation;
+    out._aimcq_explanation = explSrc != null ? explSrc : '';
+
+    if (keepHi) {
+        out._aimcq_title_hi = meta._aimcq_title_hi != null ? meta._aimcq_title_hi : '';
+        out._aimcq_question_content_hi = meta._aimcq_question_content_hi != null ? meta._aimcq_question_content_hi : '';
+        out._aimcq_options_hi = Array.isArray(meta._aimcq_options_hi)
+            ? meta._aimcq_options_hi.map(aimcqCanonicalizeOption) : [];
+    }
+    out._aimcq_correct_answers = Array.isArray(meta._aimcq_correct_answers)
+        ? meta._aimcq_correct_answers.map(Number) : [0];
+    if (keepHi) {
+        out._aimcq_explanation_hi = meta._aimcq_explanation_hi != null ? meta._aimcq_explanation_hi : '';
+    }
+    return out;
 }
 
 // One post → standard key order, only the known keys (extras dropped).
-function aimcqCanonicalizePost(post) {
+// `promoteLang` (a secondary language code) promotes that language's
+// translated title/content into the base post fields.
+function aimcqCanonicalizePost(post, langCodes, promoteLang) {
     if (!post || typeof post !== 'object') return post;
+    var meta0 = (post.meta_input && typeof post.meta_input === 'object') ? post.meta_input : {};
+    var map = promoteLang ? AIMCQ_SECONDARY_FIELDS[promoteLang] : null;
     var out = {};
     if ('id' in post) out.id = post.id;
     out.post_author  = post.post_author != null ? post.post_author : 1;
     out.post_date    = post.post_date != null ? post.post_date : '';
-    out.post_title   = post.post_title != null ? post.post_title : '';
-    out.post_content = post.post_content != null ? post.post_content : '';
+    out.post_title   = (map && aimcqHasText(meta0[map.post_title]))
+        ? meta0[map.post_title] : (post.post_title != null ? post.post_title : '');
+    out.post_content = (map && aimcqHasText(meta0[map.post_content]))
+        ? meta0[map.post_content] : (post.post_content != null ? post.post_content : '');
     out.post_status  = post.post_status != null ? post.post_status : 'publish';
     out.post_type    = post.post_type != null ? post.post_type : 'question';
-    out.meta_input   = aimcqCanonicalizeMeta(post.meta_input);
+    out.meta_input   = aimcqCanonicalizeMeta(post.meta_input, langCodes, promoteLang);
     out.taxonomies   = (post.taxonomies && typeof post.taxonomies === 'object') ? post.taxonomies : {};
     out.embedded_media = Array.isArray(post.embedded_media) ? post.embedded_media : [];
+    return out;
+}
+
+/* ====================================================================
+   LANGUAGE DETECTION (extensible, multi-language ready)
+   --------------------------------------------------------------------
+   A quiz's languages are described by a compact `language_code` stored on
+   each taxonomy term, e.g.:
+       "01EN"   → 1 language : English only
+       "01HI"   → 1 language : Hindi only
+       "02ENHI" → 2 languages: English + Hindi
+   Format = a 2-digit count followed by N two-letter language codes.
+   To add a new language later, add ONE entry to AIMCQ_LANG_REGISTRY below
+   (e.g. BN, TA, TE) — every helper, label and the canonical export pick it
+   up automatically. The frontend can read the resolved languages to render
+   its language toggle / labels.
+   ==================================================================== */
+var AIMCQ_LANG_REGISTRY = {
+    EN: { code: 'EN', label: 'English', native: 'English',  toggle: 'EN'  },
+    HI: { code: 'HI', label: 'Hindi',   native: 'हिन्दी',    toggle: 'हिं' }
+    // Future languages — just add here, e.g.:
+    // BN: { code: 'BN', label: 'Bengali', native: 'বাংলা',   toggle: 'বাং' },
+    // TA: { code: 'TA', label: 'Tamil',   native: 'தமிழ்',   toggle: 'த'   },
+};
+
+// Look up one 2-letter code; unknown codes degrade gracefully to themselves.
+function aimcqLangInfo(code) {
+    var c = String(code || '').toUpperCase();
+    return AIMCQ_LANG_REGISTRY[c] || { code: c, label: c, native: c, toggle: c };
+}
+
+// ['EN','HI'] → "02ENHI"  (2-digit count + concatenated codes)
+function aimcqBuildLanguageCode(codes) {
+    var list = Array.isArray(codes) ? codes : [];
+    var n = list.length;
+    return (n < 10 ? '0' + n : '' + n) + list.join('');
+}
+
+// ['EN','HI'] → "English and Hindi" ; ['HI'] → "Hindi"
+function aimcqLanguageLabel(codes) {
+    var names = (Array.isArray(codes) ? codes : []).map(function (c) { return aimcqLangInfo(c).label; });
+    if (names.length === 0) return '';
+    if (names.length === 1) return names[0];
+    if (names.length === 2) return names[0] + ' and ' + names[1];
+    return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+}
+
+// Parse a language_code string (tolerant of whitespace, case, missing count).
+//   "02ENHI " → { valid:true, count:2, codes:['EN','HI'],
+//                 languages:[{...}], label:'English and Hindi',
+//                 normalizedCode:'02ENHI' }
+function aimcqParseLanguageCode(code) {
+    var raw = (code == null ? '' : String(code)).trim().toUpperCase();
+    var letters = raw.replace(/^\d+/, '').replace(/[^A-Z]/g, ''); // drop count + non-letters
+    var codes = [];
+    for (var i = 0; i + 2 <= letters.length; i += 2) codes.push(letters.slice(i, i + 2));
+    var seen = {};
+    codes = codes.filter(function (c) { if (seen[c]) return false; seen[c] = 1; return true; });
+    return {
+        valid: codes.length > 0,
+        count: codes.length,
+        codes: codes,
+        languages: codes.map(aimcqLangInfo),
+        label: aimcqLanguageLabel(codes),
+        normalizedCode: aimcqBuildLanguageCode(codes)
+    };
+}
+
+// Fallback when no explicit code exists: infer from post content.
+// English is the base; Hindi is flagged when any *_hi field carries text.
+function aimcqDetectLanguagesFromPosts(data) {
+    var hasEn = false, hasHi = false;
+    var posts = (data && Array.isArray(data.posts)) ? data.posts : [];
+    posts.forEach(function (p) {
+        var m = (p && p.meta_input) || {};
+        if ((p && ((p.post_content || '').trim() || (p.post_title || '').trim())) ||
+            (m._aimcq_explanation || '').trim() ||
+            (Array.isArray(m._aimcq_options) && m._aimcq_options.some(function (o) { return o && (o.text || '').trim(); }))) {
+            hasEn = true;
+        }
+        if ((m._aimcq_title_hi || '').trim() || (m._aimcq_question_content_hi || '').trim() ||
+            (m._aimcq_explanation_hi || '').trim() ||
+            (Array.isArray(m._aimcq_options_hi) && m._aimcq_options_hi.some(function (o) { return o && (o.text || '').trim(); }))) {
+            hasHi = true;
+        }
+    });
+    var codes = [];
+    if (hasEn) codes.push('EN');
+    if (hasHi) codes.push('HI');
+    if (!codes.length) codes.push('EN'); // sensible default
+    return codes;
+}
+
+// Resolve the languages for a whole export object.
+// Priority: an explicit term `language_code` wins; otherwise infer from posts.
+function aimcqResolveLanguages(data) {
+    var explicit = '';
+    var terms = (data && Array.isArray(data.terms)) ? data.terms : [];
+    terms.forEach(function (t) {
+        if (!explicit && t && t.language_code != null && String(t.language_code).trim()) {
+            explicit = t.language_code;
+        }
+    });
+    if (explicit) {
+        var parsed = aimcqParseLanguageCode(explicit);
+        if (parsed.valid) return parsed;
+    }
+    var codes = aimcqDetectLanguagesFromPosts(data);
+    return {
+        valid: codes.length > 0,
+        count: codes.length,
+        codes: codes,
+        languages: codes.map(aimcqLangInfo),
+        label: aimcqLanguageLabel(codes),
+        normalizedCode: aimcqBuildLanguageCode(codes)
+    };
+}
+
+// One taxonomy term → standard key order
+// { taxonomy, language, language_code, name, slug }, extras dropped.
+// `language`/`language_code` are normalized (trimmed, count recomputed) from
+// the term's own code when present, otherwise filled from the resolved quiz
+// languages so older files gain correct metadata. `parent` is kept (after
+// slug) only when non-empty, so a taxonomy hierarchy is never silently lost.
+function aimcqCanonicalizeTerm(term, resolvedLang) {
+    if (!term || typeof term !== 'object') return term;
+    var out = { taxonomy: term.taxonomy != null ? term.taxonomy : '' };
+
+    var parsed = (term.language_code != null && String(term.language_code).trim())
+        ? aimcqParseLanguageCode(term.language_code)
+        : (resolvedLang && resolvedLang.valid ? resolvedLang : null);
+
+    if (parsed && parsed.valid) {
+        out.language = parsed.label;
+        out.language_code = parsed.normalizedCode;
+    } else {
+        if (term.language != null) out.language = term.language;
+        if (term.language_code != null) out.language_code = String(term.language_code).trim();
+    }
+
+    out.name = term.name != null ? term.name : '';
+    out.slug = term.slug != null ? term.slug : '';
+    if (term.parent != null && term.parent !== '') out.parent = term.parent;
     return out;
 }
 
@@ -215,10 +408,18 @@ function aimcqCanonicalizePost(post) {
 function aimcqCanonicalizeExport(data) {
     if (!data || typeof data !== 'object' || !Array.isArray(data.posts)) return data;
     var out = {};
+    var resolvedLang = aimcqResolveLanguages(data);
+    var codes = (resolvedLang && resolvedLang.codes) ? resolvedLang.codes : null;
+    // When the quiz is reduced to a single SECONDARY language, promote that
+    // language's translated content into the base fields.
+    var promoteLang = (codes && codes.length === 1 && AIMCQ_SECONDARY_FIELDS[codes[0]])
+        ? codes[0] : null;
     if ('version' in data) out.version = data.version;
     if ('export_type' in data) out.export_type = data.export_type;
-    if ('terms' in data) out.terms = data.terms;
-    out.posts = data.posts.map(aimcqCanonicalizePost);
+    if ('terms' in data) out.terms = Array.isArray(data.terms)
+        ? data.terms.map(function (t) { return aimcqCanonicalizeTerm(t, resolvedLang); })
+        : data.terms;
+    out.posts = data.posts.map(function (p) { return aimcqCanonicalizePost(p, codes, promoteLang); });
     Object.keys(data).forEach(function (k) {
         if (k !== 'version' && k !== 'export_type' && k !== 'terms' && k !== 'posts' && !(k in out)) {
             out[k] = data[k];
@@ -226,6 +427,41 @@ function aimcqCanonicalizeExport(data) {
     });
     return out;
 }
+
+// Expose the language utilities on the public MCQTool namespace so the
+// frontend / other scripts can reuse them (e.g. MCQTool.detectLanguages(data)).
+try {
+    if (typeof window !== 'undefined') {
+        window.MCQTool = window.MCQTool || {};
+        window.MCQTool.languages       = AIMCQ_LANG_REGISTRY;
+        window.MCQTool.parseLanguageCode = aimcqParseLanguageCode;
+        window.MCQTool.buildLanguageCode = aimcqBuildLanguageCode;
+        window.MCQTool.languageLabel     = aimcqLanguageLabel;
+        window.MCQTool.detectLanguages   = aimcqResolveLanguages;
+        window.MCQTool.canonicalize      = aimcqCanonicalizeExport;
+        // Force a dataset to a given language mode, then canonicalize so the
+        // output matches that mode exactly (e.g. switching to '01EN' strips
+        // the Hindi translation fields). Accepts a code string ("01EN",
+        // "02ENHI") or an array of codes (['EN'], ['EN','HI']).
+        window.MCQTool.setLanguages = function (data, codeOrCodes) {
+            if (!data || !Array.isArray(data.posts)) return data;
+            var codes = Array.isArray(codeOrCodes)
+                ? codeOrCodes.map(function (c) { return String(c).toUpperCase(); })
+                : aimcqParseLanguageCode(codeOrCodes).codes;
+            var code = aimcqBuildLanguageCode(codes);
+            var label = aimcqLanguageLabel(codes);
+            var clone = JSON.parse(JSON.stringify(data));
+            (clone.terms || []).forEach(function (t) {
+                if (t && typeof t === 'object') { t.language = label; t.language_code = code; }
+            });
+            return aimcqCanonicalizeExport(clone);
+        };
+        // Convenience wrappers.
+        window.MCQTool.toEnglishOnly = function (data) { return window.MCQTool.setLanguages(data, '01EN'); };
+        window.MCQTool.toHindiOnly   = function (data) { return window.MCQTool.setLanguages(data, '01HI'); };
+        window.MCQTool.toBilingual   = function (data) { return window.MCQTool.setLanguages(data, '02ENHI'); };
+    }
+} catch (e) {}
 
 function stripHtmlTags(str) {
     if (!str) return '';
@@ -4817,6 +5053,29 @@ function fbIndent(str, pad) {
 }
 
 // Build the settings object literal as formatted JS source.
+// Detect the quiz languages from whatever JSON the Frontend Builder has
+// in-hand: Method 1's inline JSON textarea, else the loaded Editor/Figures
+// data. Returns e.g. ['EN','HI'] or [] when nothing is parseable.
+function fbDetectLanguages() {
+    var data = null;
+    if (fbState.method === '1') {
+        var ta = document.getElementById('fb-inline-json');
+        var txt = ta && ta.value ? ta.value.trim() : '';
+        if (txt) { try { data = JSON.parse(txt); } catch (e) { data = null; } }
+    }
+    if (!data) {
+        try {
+            data = (typeof editorExportData !== 'undefined' && editorExportData) ? editorExportData
+                 : (typeof editorBaseData !== 'undefined' && editorBaseData) ? editorBaseData
+                 : (typeof figState !== 'undefined' && figState && figState.data) ? figState.data
+                 : null;
+        } catch (e) { data = null; }
+    }
+    if (!data || !Array.isArray(data.posts)) return [];
+    var resolved = aimcqResolveLanguages(data);
+    return (resolved && resolved.codes) ? resolved.codes : [];
+}
+
 function fbBuildSettings(indent) {
     const val = id => document.getElementById(id);
     const num = id => { const n = parseFloat(val(id).value); return isNaN(n) ? 0 : n; };
@@ -4852,6 +5111,17 @@ function fbBuildSettings(indent) {
     if (fbState.iface === 'professional') {
         items.push({ code: `marks_per_question: ${num('fb-marks')}` });
         items.push({ code: `negative_marks: ${num('fb-negative')}` });
+    }
+
+    // Languages — detected from the source JSON's term `language_code`
+    // (e.g. "02ENHI") or inferred from content. Lets the frontend render the
+    // right language toggle / labels. Only emitted when we can read the data
+    // in-hand (Method 1 inline JSON, or the loaded Editor/Figures data).
+    var langCodes = fbDetectLanguages();
+    if (langCodes && langCodes.length) {
+        const arr = langCodes.map(c => `'${c}'`).join(', ');
+        items.push({ comment: `// languages present in this quiz (for language labels/toggle)` });
+        items.push({ code: `languages: [${arr}]` });
     }
 
     // Render: each code line gets a trailing comma except the last code
