@@ -55,7 +55,8 @@ function loadEditorBaseData(data, fileName) {
     document.getElementById('editor-base-file-name').textContent =
         `\u2713 ${editorBaseFileName} \u2014 ${data.posts.length} questions`;
     document.getElementById('editor-base-file-name').classList.add('text-blue-700','font-bold');
-    document.getElementById('editor-prompt').classList.add('hidden');
+    var _editorPromptEl = document.getElementById('editor-prompt');
+    if (_editorPromptEl) _editorPromptEl.classList.add('hidden');
     document.getElementById('editor-workspace').classList.remove('hidden');
     document.getElementById('editor-export-result').classList.add('hidden');
     const _vtbBase = document.getElementById('view-tab-btn-base');
@@ -4202,7 +4203,7 @@ function figGitHubOpenPicker(target) {
 
     const titleEl = document.getElementById('fig-gh-picker-title');
     if (titleEl) titleEl.textContent =
-        ghPickerTarget === 'editor'      ? 'GitHub — Base JSON for the Editor' :
+        ghPickerTarget === 'editor'      ? 'GitHub — JSON for the Editor' :
         ghPickerTarget === 'quizbuilder' ? 'GitHub — Source JSON for the Quiz Builder' :
                                            'GitHub — Questions JSON for the Figure Updater';
 
@@ -5027,7 +5028,7 @@ function editorUnlinkGitHub() {
 function editorCopyGitHubCdn() {
     const f = editorGitHubFile;
     if (!f || !f.path) {
-        showToast('No GitHub file', 'Load a Base JSON from GitHub first.', 'error');
+        showToast('No GitHub file', 'Load a JSON from GitHub first.', 'error');
         return;
     }
     ghCopyToClipboard(ghJsonCdnUrl(f.repo, f.branch, f.path), 'jsDelivr CDN link');
@@ -5055,7 +5056,7 @@ async function editorUpdateToGitHub() {
         return;
     }
     if (!editorGitHubFile || !editorGitHubFile.path) {
-        showToast('Not linked', 'No GitHub file is linked. Load the Base JSON from GitHub first.', 'error');
+        showToast('Not linked', 'No GitHub file is linked. Load the JSON from GitHub first.', 'error');
         return;
     }
     const btn = document.getElementById('btn-update-github');
