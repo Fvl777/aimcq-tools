@@ -1335,7 +1335,16 @@ function injectGuardStyle(){
   st.textContent =
     '.mcqs-embed{min-height:480px;background-color:#f3f4f6;}' +
     '.mcqs-embed .mcqs-app-root{opacity:0;}' +
-    '.mcqs-embed.mcqs-ready .mcqs-app-root{opacity:1;transition:opacity .18s ease;}';
+    '.mcqs-embed.mcqs-ready .mcqs-app-root{opacity:1;transition:opacity .18s ease;}' +
+    // Until the tool is revealed, kill every transition/animation inside it.
+    // Otherwise elements that initialise to a hidden state — notably the
+    // bottom-right #toast, which carries `transition-all duration-300` — animate
+    // their initial hide, and that fade is still in flight when we reveal,
+    // showing up as a flash in the corner. Suppressing transitions makes them
+    // snap straight to their hidden state before anything becomes visible.
+    '.mcqs-embed:not(.mcqs-ready) *,' +
+    '.mcqs-embed:not(.mcqs-ready) *::before,' +
+    '.mcqs-embed:not(.mcqs-ready) *::after{transition:none!important;animation:none!important;}';
   (document.head || document.documentElement).appendChild(st);
 }
 
