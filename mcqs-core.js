@@ -44,6 +44,7 @@ function loadEditorBaseData(data, fileName) {
     }
     editorBaseData = data;
     editorBaseFileName = fileName || 'questions.json';
+    editorComputeLangs();   // resolve languages from this file's language_code
     editorDeleteSet.clear();
     editorImportSet.clear();
     try { _expandedBase.clear(); _expandedImport.clear(); _cardLang = {}; } catch(e) {}
@@ -70,6 +71,7 @@ function loadEditorBaseData(data, fileName) {
     document.getElementById('editor-filter').innerHTML =
         `<option value="all">All</option><option value="to-delete">To Delete</option>`;
 
+    editorApplyLanguageUI();
     renderEditorWorkspace();
     return true;
 }
@@ -676,6 +678,7 @@ function loadEditorBase(file) {
         try {
             editorBaseData = data;
             editorBaseFileName = file.name;
+            editorComputeLangs();   // resolve languages from this file's language_code
             editorDeleteSet.clear();
             editorImportSet.clear();
             try { _expandedBase.clear(); _expandedImport.clear(); _cardLang = {}; } catch(e) {}
@@ -705,6 +708,7 @@ function loadEditorBase(file) {
             if (liveBadge) liveBadge.classList.remove('hidden');
             document.getElementById('editor-filter').innerHTML =
                 '<option value="all">All</option><option value="to-delete">To Delete</option>';
+            editorApplyLanguageUI();
             renderEditorWorkspace();
             if (typeof refreshEditorGitHubButtons === 'function') refreshEditorGitHubButtons();
             showToast("Base Loaded", `${data.posts.length} questions ready.`, "success");
@@ -880,6 +884,7 @@ document.getElementById('btn-collapse-all').addEventListener('click', () => {
     renderEditorWorkspace();
 });
 document.getElementById('editor-default-lang').addEventListener('change', (e) => {
+    if (!editorIsBilingual()) return;   // single-language: nothing to switch
     _defaultLang = e.target.value === 'hi' ? 'hi' : 'en';
     // Clear per-card overrides so the new default takes effect everywhere
     _cardLang = {};
@@ -896,6 +901,88 @@ let _expandedBase = new Set();          // base indices currently expanded
 let _expandedImport = new Set();        // composite keys currently expanded
 let _cardLang = {};                     // per-card language override (key: 'b:idx' or 'i:si:pidx')
 let _defaultLang = 'en';                // default display language
+
+/* ====================================================================
+   EDITOR LANGUAGE MODEL (driven by the file's language_code)
+   --------------------------------------------------------------------
+   _editorLangs       : display languages present, e.g. ['en'], ['hi'],
+                        ['en','hi'] — resolved from the file's term
+                        language_code (falls back to content detection).
+   _editorLangSlots   : where each language's content lives in THIS file:
+                        'primary' (post_content/_aimcq_options/_aimcq_explanation)
+                        or 'secondary' (the _aimcq_*_hi fields). In a single-
+                        language file the sole language always occupies the
+                        primary fields, so 01HI reads Hindi from the primary
+                        fields, not from _hi.
+   ==================================================================== */
+let _editorLangs = ['en'];
+let _editorLangSlots = { en: 'primary' };
+
+// Resolve the loaded file's languages and decide which field-slot holds each.
+function editorComputeLangs() {
+    var codes = ['EN'];
+    try {
+        var r = aimcqResolveLanguages(editorBaseData);
+        if (r && r.codes && r.codes.length) codes = r.codes;
+    } catch (e) {}
+    _editorLangs = codes.map(function (c) { return String(c).toLowerCase(); });
+    if (_editorLangs.length > 1) {
+        _editorLangSlots = { en: 'primary', hi: 'secondary' };
+    } else if (_editorLangs[0] === 'hi') {
+        _editorLangSlots = { hi: 'primary' };
+    } else {
+        _editorLangSlots = { en: 'primary' };
+    }
+    _defaultLang = _editorLangs[0] || 'en';
+    _cardLang = {};
+}
+
+function editorIsBilingual() { return _editorLangs.length > 1; }
+
+// Which field-slot ('primary'|'secondary') holds the given display language.
+function editorSlotForLang(lang) {
+    if (_editorLangSlots && _editorLangSlots[lang]) return _editorLangSlots[lang];
+    return lang === 'hi' ? 'secondary' : 'primary';
+}
+
+// Read {question, options, explanation} from a post for a given field-slot.
+function editorReadSlot(post, slot) {
+    const meta = post.meta_input || {};
+    if (slot === 'secondary') {
+        return {
+            question: meta._aimcq_question_content_hi || meta._aimcq_title_hi || '',
+            options: Array.isArray(meta._aimcq_options_hi) ? meta._aimcq_options_hi : [],
+            explanation: meta._aimcq_explanation_hi || ''
+        };
+    }
+    return {
+        question: post.post_content || post.post_title || '',
+        options: Array.isArray(meta._aimcq_options) ? meta._aimcq_options : [],
+        explanation: meta._aimcq_explanation || ''
+    };
+}
+
+// Short label for a display language (used on the single-language flag).
+function editorLangLabel(lang) {
+    try {
+        var info = aimcqLangInfo(String(lang).toUpperCase());
+        return info.toggle || info.code;
+    } catch (e) { return lang === 'hi' ? 'हिं' : 'EN'; }
+}
+
+// Show/hide the front-view default-language selector based on the file.
+function editorApplyLanguageUI() {
+    var sel = document.getElementById('editor-default-lang');
+    if (sel) {
+        if (editorIsBilingual()) {
+            sel.style.display = '';
+            sel.value = (_defaultLang === 'hi') ? 'hi' : 'en';
+        } else {
+            // Single language → nothing to switch between.
+            sel.style.display = 'none';
+        }
+    }
+}
 
 // Sanitize rendered HTML from user JSON (strip scripts + on* handlers + javascript: URLs)
 function qfvSanitizeHtml(html) {
@@ -967,24 +1054,21 @@ function qfvRenderMathIn(container) {
 // Get display fields for a post based on language
 function qfvGetDisplayFields(post, lang) {
     const meta = post.meta_input || {};
-    const en = {
-        question: post.post_content || post.post_title || '',
-        options: Array.isArray(meta._aimcq_options) ? meta._aimcq_options : [],
-        explanation: meta._aimcq_explanation || '',
-    };
-    const hi = {
-        question: meta._aimcq_question_content_hi || meta._aimcq_title_hi || '',
-        options: Array.isArray(meta._aimcq_options_hi) ? meta._aimcq_options_hi : [],
-        explanation: meta._aimcq_explanation_hi || '',
-    };
+    const slot = editorSlotForLang(lang);
+    const chosen = editorReadSlot(post, slot);
     const correct = Array.isArray(meta._aimcq_correct_answers) ? meta._aimcq_correct_answers.map(Number) : [0];
-    const hasHi = !!(hi.question || (hi.options && hi.options.some(o => o && (o.text || o.image))) || hi.explanation);
-    const chosen = (lang === 'hi' && hasHi) ? hi : en;
-    // If HI options are missing but EN options exist, fall back to EN for options rendering
-    if (lang === 'hi' && (!chosen.options || !chosen.options.length) && en.options.length) {
-        chosen.options = en.options;
+    // If this slot has no options but the primary slot does, fall back so a
+    // bilingual card with missing HI options still renders option text.
+    if ((!chosen.options || !chosen.options.length)) {
+        const prim = editorReadSlot(post, 'primary');
+        if (prim.options && prim.options.length) chosen.options = prim.options;
     }
-    return { ...chosen, correct, hasHi, lang: (lang === 'hi' && hasHi) ? 'hi' : 'en' };
+    // hasHi reflects whether a Hindi *secondary* translation exists (used only
+    // to decide the per-card toggle in bilingual mode).
+    const hasHi = !!(meta._aimcq_question_content_hi || meta._aimcq_title_hi ||
+        meta._aimcq_explanation_hi ||
+        (Array.isArray(meta._aimcq_options_hi) && meta._aimcq_options_hi.some(o => o && (o.text || o.image))));
+    return { ...chosen, correct, hasHi, lang };
 }
 
 // --- Main render dispatcher ---
@@ -1012,7 +1096,9 @@ function buildQfvCard(opts) {
     // opts: { kind: 'base'|'import', idx (base) OR si/pidx (import), post, search, isSelected, color }
     const { kind, post, search, isSelected } = opts;
     const cardKey = kind === 'base' ? `b:${opts.idx}` : `i:${opts.si}:${opts.pidx}`;
-    const lang = _cardLang[cardKey] || _defaultLang;
+    const bilingual = editorIsBilingual();
+    const soleLang = _editorLangs[0] || 'en';
+    const lang = bilingual ? (_cardLang[cardKey] || _defaultLang) : soleLang;
     const disp = qfvGetDisplayFields(post, lang);
     const expanded = (kind === 'base')
         ? _expandedBase.has(opts.idx)
@@ -1074,13 +1160,13 @@ function buildQfvCard(opts) {
         badgesRow.appendChild(b);
     }
 
-    // Language flag & toggle
-    if (disp.hasHi) {
+    // Language flag & toggle — only show a toggle when the file is bilingual.
+    if (bilingual) {
         const toggle = document.createElement('div');
         toggle.className = 'qfv-lang-toggle';
         toggle.innerHTML = `
-            <button type="button" class="qfv-lang-btn ${disp.lang==='en'?'active':''}" data-lang="en">EN</button>
-            <button type="button" class="qfv-lang-btn hi ${disp.lang==='hi'?'active':''}" data-lang="hi">हिं</button>
+            <button type="button" class="qfv-lang-btn ${lang==='en'?'active':''}" data-lang="en">EN</button>
+            <button type="button" class="qfv-lang-btn hi ${lang==='hi'?'active':''}" data-lang="hi">हिं</button>
         `;
         toggle.querySelectorAll('.qfv-lang-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -1095,10 +1181,10 @@ function buildQfvCard(opts) {
         });
         badgesRow.appendChild(toggle);
     } else {
-        // Show a tiny EN-only flag if a HI question could have existed but doesn't
+        // Single-language file → a static flag labelled with that language.
         const flag = document.createElement('span');
-        flag.className = 'qfv-lang-flag';
-        flag.textContent = 'EN';
+        flag.className = 'qfv-lang-flag' + (soleLang === 'hi' ? ' hi' : '');
+        flag.textContent = editorLangLabel(soleLang);
         badgesRow.appendChild(flag);
     }
     titleWrap.appendChild(badgesRow);
@@ -2138,6 +2224,8 @@ function openQEditor(idx) {
     qEditorLang = 'en';
     const post = editorBaseData.posts[idx];
     const meta = post.meta_input || {};
+    const bilingual = editorIsBilingual();
+    const soleLang = _editorLangs[0] || 'en';
 
     document.getElementById('qe-q-number').textContent = `#${idx + 1} of ${editorBaseData.posts.length}`;
 
@@ -2146,24 +2234,60 @@ function openQEditor(idx) {
         buildRichEditor(wrap);
     });
 
-    // Populate fields
+    const correctAnswers = meta._aimcq_correct_answers || [0];
+
+    // The primary ('en') panel always edits the PRIMARY fields. For a single-
+    // language file that is the sole language's content (English OR Hindi);
+    // for a bilingual file it is the English side.
     setReValue('en-question',    post.post_content || post.post_title || '');
     setReValue('en-explanation', meta._aimcq_explanation || '');
-    setReValue('hi-question',    meta._aimcq_question_content_hi || meta._aimcq_title_hi || '');
-    setReValue('hi-explanation', meta._aimcq_explanation_hi || '');
-
-    const correctAnswers = meta._aimcq_correct_answers || [0];
     const enOptions = meta._aimcq_options || [];
     renderOptionRows('qe-en-options', enOptions, correctAnswers, 'en');
 
-    const hiOptions = meta._aimcq_options_hi || [];
-    const hiOpts = hiOptions.length ? hiOptions : enOptions.map(() => ({ text: '', image: '' }));
-    renderOptionRows('qe-hi-options', hiOpts, correctAnswers, 'hi');
+    if (bilingual) {
+        setReValue('hi-question',    meta._aimcq_question_content_hi || meta._aimcq_title_hi || '');
+        setReValue('hi-explanation', meta._aimcq_explanation_hi || '');
+        const hiOptions = meta._aimcq_options_hi || [];
+        const hiOpts = hiOptions.length ? hiOptions : enOptions.map(() => ({ text: '', image: '' }));
+        renderOptionRows('qe-hi-options', hiOpts, correctAnswers, 'hi');
+    }
 
+    editorConfigureQEditorLangUI(bilingual, soleLang);
     switchQEditorLang('en');
     document.getElementById('q-editor-modal').classList.remove('hidden');
     document.body.style.overflow = 'hidden';
     lucide.createIcons();
+}
+
+// Configure the modal's language tabs + section labels for the current file.
+// Bilingual → both tabs (English / हिन्दी). Single → one tab, labelled with
+// that language, Hindi panel hidden. (The single editor always uses the
+// primary 'en' panel, which holds the sole language's content.)
+function editorConfigureQEditorLangUI(bilingual, soleLang) {
+    const tabEn = document.getElementById('qe-tab-en');
+    const tabHi = document.getElementById('qe-tab-hi');
+    const labels = document.querySelectorAll('#qe-panel-en .q-editor-section-label');
+    const isHiSingle = !bilingual && soleLang === 'hi';
+
+    if (tabHi) tabHi.style.display = bilingual ? '' : 'none';
+    if (tabEn) {
+        tabEn.innerHTML = isHiSingle ? '🇮🇳 हिन्दी' : '🇬🇧 English';
+        // In single-language mode the lone tab is just a label, not a switch.
+        tabEn.style.pointerEvents = bilingual ? '' : 'none';
+        tabEn.style.cursor = bilingual ? '' : 'default';
+    }
+    // Section labels inside the primary panel: [Question, Options, Explanation]
+    if (labels && labels.length >= 3) {
+        if (isHiSingle) {
+            labels[0].textContent = 'प्रश्न (हिन्दी)';
+            labels[1].textContent = 'विकल्प (हिन्दी)';
+            labels[2].textContent = 'व्याख्या (हिन्दी)';
+        } else {
+            labels[0].textContent = 'Question (English)';
+            labels[1].textContent = 'Options (English)';
+            labels[2].textContent = 'Explanation (English)';
+        }
+    }
 }
 
 function renderOptionRows(containerId, options, correctAnswers, lang) {
@@ -2297,6 +2421,7 @@ function escapeAttr(str) {
 }
 
 function switchQEditorLang(lang) {
+    if (!editorIsBilingual()) lang = 'en';  // single-language → primary panel only
     qEditorLang = lang;
     document.getElementById('qe-panel-en').classList.toggle('hidden', lang !== 'en');
     document.getElementById('qe-panel-hi').classList.toggle('hidden', lang !== 'hi');
@@ -2326,18 +2451,26 @@ function saveQEditor() {
     const checkedEn = document.querySelector('input[name="qe-correct-en"]:checked');
     if (checkedEn) meta._aimcq_correct_answers = [parseInt(checkedEn.value)];
 
-    // Hindi
-    const hiQ = getReValue('hi-question');
-    meta._aimcq_title_hi             = hiQ;
-    meta._aimcq_question_content_hi  = hiQ;
-    meta._aimcq_explanation_hi       = getReValue('hi-explanation');
+    if (editorIsBilingual()) {
+        // Hindi (secondary translation fields)
+        const hiQ = getReValue('hi-question');
+        meta._aimcq_title_hi             = hiQ;
+        meta._aimcq_question_content_hi  = hiQ;
+        meta._aimcq_explanation_hi       = getReValue('hi-explanation');
 
-    document.querySelectorAll('#qe-hi-options .opt-editor-wrap').forEach(wrap => {
-        const i = parseInt(wrap.getAttribute('data-opt-idx'));
-        if (!meta._aimcq_options_hi) meta._aimcq_options_hi = [];
-        if (!meta._aimcq_options_hi[i]) meta._aimcq_options_hi[i] = { text: '', image: '' };
-        meta._aimcq_options_hi[i].text = wrap.querySelector('.opt-compose').innerHTML;
-    });
+        document.querySelectorAll('#qe-hi-options .opt-editor-wrap').forEach(wrap => {
+            const i = parseInt(wrap.getAttribute('data-opt-idx'));
+            if (!meta._aimcq_options_hi) meta._aimcq_options_hi = [];
+            if (!meta._aimcq_options_hi[i]) meta._aimcq_options_hi[i] = { text: '', image: '' };
+            meta._aimcq_options_hi[i].text = wrap.querySelector('.opt-compose').innerHTML;
+        });
+    } else {
+        // Single-language file: no translation fields should linger.
+        delete meta._aimcq_title_hi;
+        delete meta._aimcq_question_content_hi;
+        delete meta._aimcq_explanation_hi;
+        delete meta._aimcq_options_hi;
+    }
 
     closeQEditor();
     renderEditorWorkspace();
