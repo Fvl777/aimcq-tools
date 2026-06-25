@@ -1397,6 +1397,37 @@
     if (window.console) { console.error("[MCQTool]", msg); }
   }
 
+  // ---------- wait until Tailwind's runtime CSS is actually applied ----------
+  // The Tailwind Play CDN (cdn.tailwindcss.com) is a JS bundle that downloads,
+  // then JIT-compiles utility CSS and injects a <style> tag asynchronously.
+  // Its onload only means the script ran - NOT that the styles are painted.
+  // So we probe a real utility that the markup uses ("hidden" -> display:none).
+  // When the probe resolves, the generated utilities are live in the document.
+  function tailwindApplied() {
+    var p = document.createElement("div");
+    p.className = "hidden";                 // a utility actually present in MARKUP
+    p.setAttribute("aria-hidden", "true");
+    p.style.position = "absolute";
+    p.style.left = "-9999px";
+    p.style.pointerEvents = "none";
+    document.body.appendChild(p);
+    var applied = false;
+    try { applied = window.getComputedStyle(p).display === "none"; } catch (e) {}
+    if (p.parentNode) { p.parentNode.removeChild(p); }
+    return applied;
+  }
+
+  function whenTailwindReady(cb) {
+    var tries = 0, MAX = 200;               // ~200 * 25ms = 5s of polling at most
+    (function check() {
+      // window.tailwind appears once the bundle has executed; the probe confirms
+      // the generated stylesheet is live. Either failing just keeps us polling.
+      if (window.tailwind && tailwindApplied()) { cb(); return; }
+      if (++tries > MAX) { cb(); return; }  // give up gracefully; safety net handles it
+      setTimeout(check, 25);
+    })();
+  }
+
   // ---------- mount ----------
   function findHost() {
     return document.querySelector("[data-mcqs-tool]")
@@ -1426,6 +1457,8 @@
     var root = document.createElement("div");
     root.className = "mcqs-tool-root min-h-screen p-4 sm:p-8 text-gray-800";
     root.style.visibility = "hidden";
+    root.style.opacity = "0";
+    root.style.transition = "opacity .18s ease";
     root.innerHTML = MARKUP;
     host.innerHTML = "";
     host.appendChild(root);
@@ -1442,23 +1475,45 @@
       + '<style>@keyframes mcqs-spin{to{transform:rotate(360deg)}}</style>';
     host.appendChild(overlay);
 
-    // 4) Reveal once our CSS is applied (+ two frames so the Tailwind runtime
-    //    has injected its generated styles too), with a safety-net timeout.
-    var revealed = false;
-    function reveal() {
+    // 4) Reveal only once BOTH style layers are live:
+    //      (a) our own mcqs-tool.css has loaded, AND
+    //      (b) the Tailwind runtime has injected its generated utilities.
+    //    Revealing on (a) alone (the old behaviour) un-hid the markup while
+    //    Tailwind was still compiling -> a flash of unstyled HTML. We now gate
+    //    on both, then wait two frames so the final layout is painted, and
+    //    fade in so any sub-frame change is imperceptible.
+    var cssReady = false, twReady = false, revealed = false;
+
+    function doReveal() {
       if (revealed) { return; }
       revealed = true;
       var raf = window.requestAnimationFrame || function (f) { return setTimeout(f, 16); };
       raf(function () {
         raf(function () {
           root.style.visibility = "";
+          root.style.opacity = "1";
           host.style.background = "";
-          if (overlay && overlay.parentNode) { overlay.parentNode.removeChild(overlay); }
+          if (overlay && overlay.parentNode) {
+            // let the fade run, then drop the overlay
+            setTimeout(function () {
+              if (overlay.parentNode) { overlay.parentNode.removeChild(overlay); }
+            }, 180);
+          }
         });
       });
     }
-    ensureCSS(reveal);          // fires when mcqs-tool.css has loaded (or already present)
-    setTimeout(reveal, 1500);   // never leave the tool hidden if onload never fires
+
+    function maybeReveal() {
+      if (cssReady && twReady) { doReveal(); }
+    }
+
+    ensureCSS(function () { cssReady = true; maybeReveal(); });   // mcqs-tool.css loaded (or 404'd)
+    whenTailwindReady(function () { twReady = true; maybeReveal(); });
+
+    // Safety net: never leave the tool hidden if a CDN stalls. Longer than the
+    // old 1.5s so a cold Tailwind load isn't cut short into a flash, but still
+    // bounded so a genuine failure doesn't trap the user on the spinner forever.
+    setTimeout(doReveal, 6000);
 
     // 5) Tool logic — the markup is already in the DOM, so it wires up correctly.
     loadCore(host);
