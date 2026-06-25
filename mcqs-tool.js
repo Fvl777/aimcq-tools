@@ -1309,13 +1309,16 @@
     return false;
   }
 
-  function addCSS(href, marker) {
-    if (marker && document.querySelector('link[' + marker + ']')) { return; }
-    if (alreadyHas(function (u) { return u.indexOf(href) > -1; })) { return; }
+  function addCSS(href, marker, onload) {
+    var found = null;
+    if (marker) { found = document.querySelector('link[' + marker + ']'); }
+    if (!found && alreadyHas(function (u) { return u.indexOf(href) > -1; })) { found = true; }
+    if (found) { if (onload) { setTimeout(onload, 0); } return; }
     var l = document.createElement("link");
     l.rel = "stylesheet";
     l.href = href;
     if (marker) { l.setAttribute(marker, "1"); }
+    if (onload) { l.onload = onload; l.onerror = onload; }  // reveal even if the CSS 404s
     document.head.appendChild(l);
   }
 
@@ -1369,8 +1372,9 @@
   }
 
   // ---------- the tool's own css + core logic ----------
-  function ensureCSS() {
-    if (BASE) { addCSS(BASE + "mcqs-tool.css", "data-mcqs-css"); }
+  function ensureCSS(onload) {
+    if (BASE) { addCSS(BASE + "mcqs-tool.css", "data-mcqs-css", onload); }
+    else if (onload) { setTimeout(onload, 0); }
   }
 
   function loadCore(host) {
@@ -1410,17 +1414,54 @@
     var h = host.getAttribute("data-height");
     if (h) { host.style.minHeight = /^\d+$/.test(h) ? (h + "px") : h; }
     host.style.width = "100%";
+    if (!host.style.position) { host.style.position = "relative"; }
+    host.style.background = "#f3f4f6";            // calm backdrop = no white/unstyled flash
+    if (!h) { host.style.minHeight = "240px"; }   // reserve space for the loader
 
-    // Inject markup inside a wrapper that carries the original <body> classes.
+    // 1) Start fetching styles + libraries BEFORE the markup can paint.
+    loadDeps();
+
+    // 2) Build the tool markup, but keep it hidden until the CSS is applied.
+    //    It still goes into the DOM so the core script can wire up against it.
     var root = document.createElement("div");
     root.className = "mcqs-tool-root min-h-screen p-4 sm:p-8 text-gray-800";
+    root.style.visibility = "hidden";
     root.innerHTML = MARKUP;
     host.innerHTML = "";
     host.appendChild(root);
 
-    ensureCSS();   // tool styles
-    loadDeps();    // third-party libs (lazy users; safe to finish after core boots)
-    loadCore(host);// tool logic - DOM is already in place, so it wires up correctly
+    // 3) Lightweight loading overlay shown until reveal().
+    var overlay = document.createElement("div");
+    overlay.setAttribute("data-mcqs-loading", "1");
+    overlay.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;"
+      + "justify-content:center;gap:10px;background:#f3f4f6;z-index:2;"
+      + "font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#6b7280;font-size:13px;";
+    overlay.innerHTML = '<span style="width:16px;height:16px;border:2px solid #c7cdd6;'
+      + 'border-top-color:#4f46e5;border-radius:50%;display:inline-block;'
+      + 'animation:mcqs-spin .7s linear infinite;"></span>Loading\u2026'
+      + '<style>@keyframes mcqs-spin{to{transform:rotate(360deg)}}</style>';
+    host.appendChild(overlay);
+
+    // 4) Reveal once our CSS is applied (+ two frames so the Tailwind runtime
+    //    has injected its generated styles too), with a safety-net timeout.
+    var revealed = false;
+    function reveal() {
+      if (revealed) { return; }
+      revealed = true;
+      var raf = window.requestAnimationFrame || function (f) { return setTimeout(f, 16); };
+      raf(function () {
+        raf(function () {
+          root.style.visibility = "";
+          host.style.background = "";
+          if (overlay && overlay.parentNode) { overlay.parentNode.removeChild(overlay); }
+        });
+      });
+    }
+    ensureCSS(reveal);          // fires when mcqs-tool.css has loaded (or already present)
+    setTimeout(reveal, 1500);   // never leave the tool hidden if onload never fires
+
+    // 5) Tool logic — the markup is already in the DOM, so it wires up correctly.
+    loadCore(host);
   }
 
   function boot() { mount(findHost()); }
