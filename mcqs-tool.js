@@ -265,11 +265,11 @@
         <!-- ==================== EDITOR TAB ==================== -->
         <div id="tab-editor" class="hidden space-y-5">
 
-            <!-- Step 1: Load Base JSON -->
+            <!-- Step 1: Load JSON -->
             <div id="editor-step-upload" class="space-y-4">
                 <div class="flex items-center gap-3 flex-wrap">
                     <span class="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">1</span>
-                    <h3 class="font-semibold text-gray-800 flex-1">Load Base JSON <span class="text-gray-400 font-normal text-sm">(the file you want to edit)</span></h3>
+                    <h3 class="font-semibold text-gray-800 flex-1">Load JSON <span class="text-gray-400 font-normal text-sm">(the file you want to edit)</span></h3>
                     <button id="editor-btn-load-github" class="gd-btn gd-btn-outline" onclick="figGitHubOpenPicker('editor')">
                         <i data-lucide="github" class="w-3.5 h-3.5"></i> Load from GitHub
                     </button>
@@ -277,7 +277,7 @@
                 <div id="editor-base-dropzone" class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center cursor-pointer hover:bg-gray-50 transition-colors relative">
                     <input type="file" id="editor-base-file" accept=".json" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
                     <i data-lucide="file-json" class="w-9 h-9 mx-auto text-gray-400 mb-2"></i>
-                    <p class="text-sm text-gray-600 font-medium" id="editor-base-file-name">Click or drag Base JSON here</p>
+                    <p class="text-sm text-gray-600 font-medium" id="editor-base-file-name">Click or drag JSON here</p>
                     <p class="text-xs text-gray-400 mt-1">aimcq formatted JSON — or load from GitHub</p>
                 </div>
                 <!-- GitHub link chip (shown when file was loaded from GitHub) -->
@@ -387,7 +387,7 @@
                     <div id="live-json-preview-box" class="hidden mb-3">
                         <div class="flex items-center justify-between mb-1.5">
                             <span class="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
-                                <i data-lucide="braces" class="w-3.5 h-3.5 text-indigo-400"></i> Live Base JSON Preview
+                                <i data-lucide="braces" class="w-3.5 h-3.5 text-indigo-400"></i> Live JSON Preview
                                 <span class="live-badge"><span class="live-dot"></span> Auto-updates</span>
                             </span>
                             <span class="text-xs text-gray-400" id="live-json-meta"></span>
@@ -426,12 +426,6 @@
                     </p>
                 </div>
 
-            </div>
-
-            <!-- Prompt to load base file -->
-            <div id="editor-prompt" class="py-12 text-center text-gray-400 text-sm">
-                <i data-lucide="arrow-up-circle" class="w-10 h-10 mx-auto mb-3 text-gray-300"></i>
-                Load a Base JSON above to start editing.
             </div>
 
         </div>
