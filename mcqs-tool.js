@@ -923,7 +923,7 @@
 </div>
 
 <!-- ===== Question Editor Modal ===== -->
-<div id="q-editor-modal" class="hidden">
+<div id="q-editor-modal" class="hidden" style="display:none">
     <div id="q-editor-backdrop" onclick="closeQEditor()"></div>
     <div id="q-editor-panel" class="custom-scrollbar">
 
@@ -1026,7 +1026,7 @@
 </div>
 
 <!-- ===== GitHub File Picker Modal (tabbed) ===== -->
-<div id="fig-gh-picker-modal" class="gd-modal hidden">
+<div id="fig-gh-picker-modal" class="gd-modal hidden" style="display:none">
     <div class="gd-modal-backdrop" onclick="figGitHubClosePicker()"></div>
     <div class="gd-modal-panel">
         <!-- Header -->
@@ -1398,15 +1398,20 @@
   // So we probe a real utility that the markup uses ("hidden" -> display:none).
   // When the probe resolves, the generated utilities are live in the document.
   function tailwindApplied() {
+    // Probe using a Tailwind-JIT-only utility (text-gray-800 -> color ~rgb(31,41,55)).
+    // We cannot use "hidden" because mcqs-tool.css now defines .hidden{display:none}
+    // itself, which would make this probe pass before Tailwind has actually run.
     var p = document.createElement("div");
-    p.className = "hidden";                 // a utility actually present in MARKUP
+    p.className = "text-gray-800";
     p.setAttribute("aria-hidden", "true");
-    p.style.position = "absolute";
-    p.style.left = "-9999px";
-    p.style.pointerEvents = "none";
+    p.style.cssText = "position:absolute;left:-9999px;pointer-events:none";
     document.body.appendChild(p);
     var applied = false;
-    try { applied = window.getComputedStyle(p).display === "none"; } catch (e) {}
+    try {
+      var c = window.getComputedStyle(p).color;
+      // Tailwind sets color to rgb(31, 41, 55); default browser color is rgb(0,0,0)
+      applied = c.indexOf("rgb") === 0 && c !== "rgb(0, 0, 0)";
+    } catch (e) {}
     if (p.parentNode) { p.parentNode.removeChild(p); }
     return applied;
   }
