@@ -76,58 +76,16 @@ As the super admin, in the dashboard:
 tenant, plus totals. Usage is metered live on every API call; charges recompute
 from the per-tenant rate/quota/fee you set under **Tenants → Edit**.
 
-## Notes & limits
+## Notes & limits (Phase 1)
 
 - A fresh install with a single tenant resolves from any domain (so nothing
   breaks before you configure domains). Once you add a 2nd tenant, requests must
   come from a configured tenant domain or they're rejected ("Unknown tenant").
-- Usernames/emails are unique **per tenant**.
-- A token issued on one domain can't be replayed on another.
-
----
-
-# Phase 2 — self-signup, quotas, invoices & payments
-
-Apply the Phase 2 migration after Phase 1:
-```bash
-cd backend
-wrangler d1 execute aimcq --file=schema-multitenant-phase2.sql --remote
-wrangler deploy
-```
-Re-upload `frontend/aimcq-auth.js` (and cache-bust it).
-
-### 1. Tenant self-service signup
-Prospective managers can register their own institute. Add a button anywhere on
-your platform/marketing page:
-```html
-<div id="aimcq-signup"></div>
-<script>aimcqReady(function(){ window.AIMCQ_AUTH.mountTenantSignup('aimcq-signup', 'Register your institute'); });</script>
-```
-They enter org name, **domain**, and a manager login. The tenant is created with
-status **pending** (its API is blocked) on a default plan. Optional env defaults
-for new signups: `DEFAULT_RATE_PER_1K`, `DEFAULT_INCLUDED_REQUESTS`,
-`DEFAULT_MONTHLY_FEE`. In **Super Admin → Tenants**, pending rows show
-**Approve** / **Reject**. Approving flips them to active; the manager can then log
-in on their domain.
-
-### 2. Hard request quota
-Each tenant has an optional **Hard request cap / month** (Tenants → Edit; 0 =
-unlimited). Once a tenant exceeds it in a month, its students' API is blocked
-(HTTP 429) until the next month — but the manager can still log in and view/pay
-billing, and you can raise the cap anytime.
-
-### 3. Invoices & payment
-**Super Admin → Invoices**: pick a month and **Generate** to raise invoices from
-the usage meter (`charge = fee + (requests − included)/1000 × rate`). Re-generating
-updates *unpaid* invoices and leaves paid/submitted ones alone. Each invoice has
-**Print** (opens a clean invoice → Print / Save as PDF) and **Mark paid**.
-
-**Manager → Platform Billing**: each tenant's manager sees their own invoices,
-the amount due, can **Print** an invoice, and **Pay** by submitting a payment
-reference (status → *submitted*). The super admin then **Mark paid** to confirm.
-
-### Not yet included (future)
-- Collecting tenant payments through a live gateway (today payment is a
-  reference the super admin confirms, mirroring the student UPI flow).
-- Automatic monthly invoice generation (today it's a one-click action).
-- Domain-ownership verification on self-signup (today approval is manual).
+- Usernames/emails are unique **per tenant** (the same email can exist on two
+  different tenants as two separate accounts).
+- Metering writes one counter row per tenant per month and increments it per API
+  call. A token issued on one domain can't be replayed on another.
+- **Not yet included** (future phases): tenant self-service signup, collecting
+  payment *from tenants* (this computes charges only), invoice PDFs, and hard
+  request-quota cut-offs (today over-quota is billed, not blocked — suspend a
+  tenant manually to stop their API).
