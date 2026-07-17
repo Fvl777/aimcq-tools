@@ -53,7 +53,7 @@ function loadEditorBaseData(data, fileName) {
     currentViewTab = 'base';
 
     document.getElementById('editor-base-file-name').textContent =
-        `\u2713 ${editorBaseFileName} \u2014 ${data.posts.length} questions`;
+        `\u2713 ${editorBaseFileName} \u2014 ${aimcqCountLabel(data.posts)}`;
     document.getElementById('editor-base-file-name').classList.add('text-blue-700','font-bold');
     var _editorPromptEl = document.getElementById('editor-prompt');
     if (_editorPromptEl) _editorPromptEl.classList.add('hidden');
@@ -135,6 +135,7 @@ const COLORS = ['#6366f1','#f59e0b','#10b981','#ef4444','#8b5cf6','#06b6d4','#f9
 
 // ==================== UTILITIES ====================
 function downloadJSON(data, filename) {
+    aimcqWarnPassageIssues(data, filename);
     const blob = new Blob([JSON.stringify(aimcqCanonicalizeExport(data), null, 4)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -167,6 +168,39 @@ var AIMCQ_META_KEY_ORDER = [
     '_aimcq_question_content_hi', '_aimcq_options_hi',
     '_aimcq_correct_answers', '_aimcq_explanation_hi'
 ];
+/* --------------------------------------------------------------------
+   PASSAGE SUPPORT (reading-comprehension groups)
+   --------------------------------------------------------------------
+   An aimcq bundle can contain `post_type: "passage"` posts plus normal
+   questions that link to them via meta keys:
+       question →  _aimcq_is_passage_question : "yes"
+                   _aimcq_passage_id          : "<passage post id>"
+       passage  →  _aimcq_passage_content_hi, _aimcq_passage_display_title_en,
+                   _aimcq_passage_display_title_hi,
+                   _aimcq_passage_translation_custom_prompt
+   These keys MUST survive every export, otherwise the aimcq engine can
+   no longer link questions to their passage and the passage box silently
+   disappears on the rendered quiz. The canonicalizers below therefore
+   preserve them explicitly (they are NOT "extras" like _aimcq_seo_robots).
+   -------------------------------------------------------------------- */
+var AIMCQ_QUESTION_PASSAGE_KEYS = ['_aimcq_is_passage_question', '_aimcq_passage_id'];
+var AIMCQ_PASSAGE_META_KEYS = [
+    '_aimcq_passage_content_hi', '_aimcq_passage_translation_custom_prompt',
+    '_aimcq_passage_display_title_en', '_aimcq_passage_display_title_hi'
+];
+
+function aimcqIsPassagePost(post) {
+    return !!post && post.post_type === 'passage';
+}
+function aimcqIsPassageQuestion(post) {
+    if (!post || post.post_type === 'passage') return false;
+    var m = post.meta_input || {};
+    return m._aimcq_is_passage_question === 'yes' || aimcqHasText(m._aimcq_passage_id);
+}
+function aimcqGetPassageId(post) {
+    var m = (post && post.meta_input) || {};
+    return m._aimcq_passage_id != null ? String(m._aimcq_passage_id) : '';
+}
 
 // One option object → exactly { text, image } in that order (extras dropped).
 function aimcqCanonicalizeOption(opt) {
@@ -211,11 +245,28 @@ function aimcqHasText(v) { return v != null && String(v).trim() !== ''; }
 // `promoteLang` names a secondary language (e.g. 'HI'), its translation
 // content is promoted into the base options/explanation before the
 // translation fields are dropped.
-function aimcqCanonicalizeMeta(meta, langCodes, promoteLang) {
+function aimcqCanonicalizeMeta(meta, langCodes, promoteLang, postType) {
     meta = (meta && typeof meta === 'object') ? meta : {};
     var keepHi = aimcqMetaKeepHindi(langCodes);
     var map = promoteLang ? AIMCQ_SECONDARY_FIELDS[promoteLang] : null;
     var out = {};
+
+    // ---- PASSAGE POSTS: emit the passage meta shape and stop. ----
+    // A passage post carries its text in post_title/post_content and its
+    // Hindi/translation variants + display titles in the passage keys.
+    // It has no options/answers of its own.
+    if (postType === 'passage') {
+        AIMCQ_PASSAGE_META_KEYS.forEach(function (k) {
+            out[k] = meta[k] != null ? meta[k] : '';
+        });
+        out._aimcq_explanation = meta._aimcq_explanation != null ? meta._aimcq_explanation : '';
+        if (keepHi) {
+            out._aimcq_title_hi = meta._aimcq_title_hi != null ? meta._aimcq_title_hi : '';
+            out._aimcq_question_content_hi = meta._aimcq_question_content_hi != null ? meta._aimcq_question_content_hi : '';
+            out._aimcq_explanation_hi = meta._aimcq_explanation_hi != null ? meta._aimcq_explanation_hi : '';
+        }
+        return out;
+    }
 
     var optsSrc = (map && Array.isArray(meta[map._aimcq_options]) && meta[map._aimcq_options].length)
         ? meta[map._aimcq_options] : meta._aimcq_options;
@@ -224,6 +275,14 @@ function aimcqCanonicalizeMeta(meta, langCodes, promoteLang) {
     var explSrc = (map && aimcqHasText(meta[map._aimcq_explanation]))
         ? meta[map._aimcq_explanation] : meta._aimcq_explanation;
     out._aimcq_explanation = explSrc != null ? explSrc : '';
+
+    // ---- QUESTION → PASSAGE LINKAGE: always preserved when present. ----
+    // Without these two keys the aimcq engine cannot attach the question to
+    // its reading passage, so the passage box is never displayed.
+    if (meta._aimcq_is_passage_question === 'yes' || aimcqHasText(meta._aimcq_passage_id)) {
+        out._aimcq_is_passage_question = meta._aimcq_is_passage_question === 'yes' ? 'yes' : 'yes';
+        out._aimcq_passage_id = meta._aimcq_passage_id != null ? String(meta._aimcq_passage_id) : '';
+    }
 
     if (keepHi) {
         out._aimcq_title_hi = meta._aimcq_title_hi != null ? meta._aimcq_title_hi : '';
@@ -245,21 +304,86 @@ function aimcqCanonicalizeMeta(meta, langCodes, promoteLang) {
 function aimcqCanonicalizePost(post, langCodes, promoteLang) {
     if (!post || typeof post !== 'object') return post;
     var meta0 = (post.meta_input && typeof post.meta_input === 'object') ? post.meta_input : {};
+    var isPassage = post.post_type === 'passage';
     var map = promoteLang ? AIMCQ_SECONDARY_FIELDS[promoteLang] : null;
     var out = {};
     if ('id' in post) out.id = post.id;
     out.post_author  = post.post_author != null ? post.post_author : 1;
     out.post_date    = post.post_date != null ? post.post_date : '';
-    out.post_title   = (map && aimcqHasText(meta0[map.post_title]))
-        ? meta0[map.post_title] : (post.post_title != null ? post.post_title : '');
-    out.post_content = (map && aimcqHasText(meta0[map.post_content]))
-        ? meta0[map.post_content] : (post.post_content != null ? post.post_content : '');
+    if (isPassage) {
+        // Passage posts carry the passage text itself in post_title/post_content.
+        // When promoting to Hindi-only, prefer the passage's Hindi content field.
+        var hiPassage = (promoteLang === 'HI' && aimcqHasText(meta0._aimcq_passage_content_hi))
+            ? meta0._aimcq_passage_content_hi : null;
+        out.post_title   = hiPassage != null ? hiPassage : (post.post_title != null ? post.post_title : '');
+        out.post_content = hiPassage != null ? hiPassage : (post.post_content != null ? post.post_content : '');
+    } else {
+        out.post_title   = (map && aimcqHasText(meta0[map.post_title]))
+            ? meta0[map.post_title] : (post.post_title != null ? post.post_title : '');
+        out.post_content = (map && aimcqHasText(meta0[map.post_content]))
+            ? meta0[map.post_content] : (post.post_content != null ? post.post_content : '');
+    }
     out.post_status  = post.post_status != null ? post.post_status : 'publish';
     out.post_type    = post.post_type != null ? post.post_type : 'question';
-    out.meta_input   = aimcqCanonicalizeMeta(post.meta_input, langCodes, promoteLang);
+    out.meta_input   = aimcqCanonicalizeMeta(post.meta_input, langCodes, promoteLang, out.post_type);
     out.taxonomies   = (post.taxonomies && typeof post.taxonomies === 'object') ? post.taxonomies : {};
     out.embedded_media = Array.isArray(post.embedded_media) ? post.embedded_media : [];
     return out;
+}
+
+/* --------------------------------------------------------------------
+   PASSAGE INTEGRITY CHECK
+   --------------------------------------------------------------------
+   Returns an array of human-readable warning strings for a bundle:
+     - questions that link to a passage id that is not in the bundle
+       (the aimcq engine can never show their passage box), and
+     - passage posts that no question links to (dead weight; the engine
+       will never display them).
+   Called at export time so the user is told BEFORE uploading a JSON
+   that would render without its passage.
+   -------------------------------------------------------------------- */
+function aimcqValidatePassages(data) {
+    var warnings = [];
+    if (!data || !Array.isArray(data.posts)) return warnings;
+    var passageIds = {};
+    data.posts.forEach(function (p) {
+        if (aimcqIsPassagePost(p) && p.id != null) passageIds[String(p.id)] = true;
+    });
+    var linkedTo = {};
+    var broken = {};
+    data.posts.forEach(function (p) {
+        if (!aimcqIsPassageQuestion(p)) return;
+        var pid = aimcqGetPassageId(p);
+        if (!pid) { warnings.push('Question id ' + p.id + ' is marked as a passage question but has no _aimcq_passage_id.'); return; }
+        if (passageIds[pid]) linkedTo[pid] = true;
+        else { broken[pid] = broken[pid] || []; broken[pid].push(p.id); }
+    });
+    Object.keys(broken).forEach(function (pid) {
+        warnings.push('Questions ' + broken[pid].join(', ') + ' link to passage id ' + pid
+            + ' but that passage post is NOT in this file — the passage will not display in the quiz.');
+    });
+    Object.keys(passageIds).forEach(function (pid) {
+        if (!linkedTo[pid]) warnings.push('Passage id ' + pid + ' has no linked questions in this file and will never be shown.');
+    });
+    return warnings;
+}
+
+// Toast any passage warnings for a bundle about to be exported/committed.
+function aimcqWarnPassageIssues(data, context) {
+    try {
+        var ws = aimcqValidatePassages(data);
+        if (ws.length && typeof showToast === 'function') {
+            showToast('Passage Warning' + (context ? ' — ' + context : ''), ws.join(' '), 'error');
+        }
+        return ws;
+    } catch (e) { return []; }
+}
+
+// Count helper: "25 questions + 1 passage" style label for toasts/stats.
+function aimcqCountLabel(posts) {
+    var q = 0, p = 0;
+    (posts || []).forEach(function (x) { if (aimcqIsPassagePost(x)) p++; else q++; });
+    return p ? (q + ' questions + ' + p + ' passage' + (p > 1 ? 's' : '')) : (q + ' questions');
 }
 
 /* ====================================================================
@@ -507,7 +631,7 @@ function handleSplitFileSelection(file) {
         try {
             splitSourceData = JSON.parse(e.target.result);
             if (!isValidAimcqJSON(splitSourceData)) throw new Error("Missing 'posts' array.");
-            showToast("File Loaded", `Found ${splitSourceData.posts.length} questions.`, "success");
+            showToast("File Loaded", `Found ${aimcqCountLabel(splitSourceData.posts)}.`, "success");
         } catch(err) { splitSourceData = null; showToast("Parse Error", err.message, "error"); }
     };
     reader.readAsText(file);
@@ -521,17 +645,52 @@ document.getElementById('btn-split').addEventListener('click', () => {
     generatedSplitChunks = [];
     let part = 1;
     const base = splitSourceFile.name.replace('.json','');
-    for (let i = 0; i < splitSourceData.posts.length; i += chunkSize) {
-        const posts = splitSourceData.posts.slice(i, i + chunkSize);
+
+    /* ---- PASSAGE-AWARE SPLIT ----
+       A passage post and every question linked to it must land in the SAME
+       output file, otherwise the aimcq engine cannot show the passage box.
+       We first bucket posts into indivisible groups (a passage + its linked
+       questions = one group; every other post = its own group), then fill
+       chunks group-by-group. `chunkSize` counts QUESTIONS (passage posts
+       ride along for free). A chunk may exceed chunkSize only when a single
+       passage group is bigger than chunkSize — splitting it would break it. */
+    const posts = splitSourceData.posts;
+    const passageGroups = {};   // passage id -> group array (shared reference)
+    const groupOrder = [];      // groups in first-appearance order
+    posts.forEach(p => {
+        let pid = null;
+        if (aimcqIsPassagePost(p) && p.id != null) pid = String(p.id);
+        else if (aimcqIsPassageQuestion(p)) pid = aimcqGetPassageId(p) || null;
+        if (pid) {
+            if (!passageGroups[pid]) { passageGroups[pid] = []; groupOrder.push(passageGroups[pid]); }
+            passageGroups[pid].push(p);
+        } else {
+            groupOrder.push([p]);
+        }
+    });
+    const questionCount = g => g.reduce((n, p) => n + (aimcqIsPassagePost(p) ? 0 : 1), 0);
+
+    let chunkPosts = [], chunkQ = 0;
+    const flush = () => {
+        if (!chunkPosts.length) return;
         generatedSplitChunks.push({
             filename: `${base}_part${part}.json`,
-            data: { version: splitSourceData.version||"1.7.0", export_type: splitSourceData.export_type||"single", terms: splitSourceData.terms||[], posts },
-            count: posts.length
+            data: { version: splitSourceData.version||"1.7.0", export_type: splitSourceData.export_type||"single", terms: splitSourceData.terms||[], posts: chunkPosts },
+            count: chunkQ
         });
-        part++;
-    }
+        part++; chunkPosts = []; chunkQ = 0;
+    };
+    groupOrder.forEach(g => {
+        const gq = questionCount(g);
+        if (chunkQ > 0 && chunkQ + gq > chunkSize) flush();
+        chunkPosts = chunkPosts.concat(g);
+        chunkQ += gq;
+        if (chunkQ >= chunkSize) flush();
+    });
+    flush();
+
     renderSplitResults();
-    showToast("Success", `Split into ${generatedSplitChunks.length} files.`, "success");
+    showToast("Success", `Split into ${generatedSplitChunks.length} files (passages kept with their questions).`, "success");
 });
 
 function renderSplitResults() {
@@ -693,7 +852,7 @@ function loadEditorBase(file) {
             }
             const nameEl = document.getElementById('editor-base-file-name');
             if (nameEl) {
-                nameEl.textContent = `\u2713 ${file.name} \u2014 ${data.posts.length} questions`;
+                nameEl.textContent = `\u2713 ${file.name} \u2014 ${aimcqCountLabel(data.posts)}`;
                 nameEl.classList.add('text-blue-700','font-bold');
             }
             const prompt = document.getElementById('editor-prompt');
@@ -712,7 +871,7 @@ function loadEditorBase(file) {
             editorApplyLanguageUI();
             renderEditorWorkspace();
             if (typeof refreshEditorGitHubButtons === 'function') refreshEditorGitHubButtons();
-            showToast("Base Loaded", `${data.posts.length} questions ready.`, "success");
+            showToast("Base Loaded", `${aimcqCountLabel(data.posts)} ready.`, "success");
         } catch (err) {
             console.error('Editor render error:', err);
             showToast("Editor Error",
@@ -1148,6 +1307,22 @@ function buildQfvCard(opts) {
     numBadge.textContent = kind === 'base' ? `Q #${opts.idx + 1}` : `Src ${opts.si+1} · #${opts.pidx+1}`;
     badgesRow.appendChild(numBadge);
 
+    // ---- Passage badges: make passage posts and their linked questions
+    // visually distinct so users don't unknowingly break the group. ----
+    if (aimcqIsPassagePost(post)) {
+        const pb = document.createElement('span');
+        pb.className = 'qfv-status-badge';
+        pb.style.cssText = 'background:#f3e8ff;color:#7c3aed;border:1px solid #ddd6fe;';
+        pb.innerHTML = '<i data-lucide="book-open" class="w-3 h-3"></i> Passage' + (post.id != null ? ` (id ${post.id})` : '');
+        badgesRow.appendChild(pb);
+    } else if (aimcqIsPassageQuestion(post)) {
+        const pb = document.createElement('span');
+        pb.className = 'qfv-status-badge';
+        pb.style.cssText = 'background:#ede9fe;color:#6d28d9;border:1px solid #ddd6fe;';
+        pb.innerHTML = '<i data-lucide="link" class="w-3 h-3"></i> Passage Q → ' + escapeHtml(aimcqGetPassageId(post));
+        badgesRow.appendChild(pb);
+    }
+
     if (isSelected && kind === 'base') {
         const b = document.createElement('span');
         b.className = 'qfv-status-badge qfv-status-del';
@@ -1360,6 +1535,56 @@ function attachBaseCheckboxListeners() {
             const idx = parseInt(e.target.getAttribute('data-idx'));
             if (e.target.checked) editorDeleteSet.add(idx);
             else editorDeleteSet.delete(idx);
+
+            // ---- Keep passage groups consistent on delete/undelete. ----
+            // Deleting a passage post orphans its questions (the engine can
+            // then never show the passage), so the whole group moves together:
+            //   - toggle a PASSAGE post  -> its linked questions follow;
+            //   - toggle a PASSAGE QUESTION -> if it was the last remaining
+            //     linked question, the (now-useless) passage post follows too,
+            //     and undeleting a question brings the passage post back.
+            const post = editorBaseData.posts[idx];
+            const affected = [];
+            if (post && aimcqIsPassagePost(post) && post.id != null) {
+                const pid = String(post.id);
+                editorBaseData.posts.forEach((p, i) => {
+                    if (i !== idx && aimcqIsPassageQuestion(p) && aimcqGetPassageId(p) === pid) {
+                        if (e.target.checked ? !editorDeleteSet.has(i) : editorDeleteSet.has(i)) {
+                            if (e.target.checked) editorDeleteSet.add(i); else editorDeleteSet.delete(i);
+                            affected.push(i);
+                        }
+                    }
+                });
+                if (affected.length) {
+                    showToast('Passage Group', (e.target.checked
+                        ? `Passage deleted — its ${affected.length} linked question(s) were marked for deletion too.`
+                        : `Passage restored — its ${affected.length} linked question(s) were restored too.`), 'success');
+                }
+            } else if (post && aimcqIsPassageQuestion(post)) {
+                const pid = aimcqGetPassageId(post);
+                let passageIdx = -1, liveLinked = 0;
+                editorBaseData.posts.forEach((p, i) => {
+                    if (aimcqIsPassagePost(p) && String(p.id) === pid) passageIdx = i;
+                    else if (i !== idx && aimcqIsPassageQuestion(p) && aimcqGetPassageId(p) === pid && !editorDeleteSet.has(i)) liveLinked++;
+                });
+                if (passageIdx !== -1) {
+                    if (e.target.checked && liveLinked === 0 && !editorDeleteSet.has(passageIdx)) {
+                        editorDeleteSet.add(passageIdx); affected.push(passageIdx);
+                        showToast('Passage Group', 'Last linked question deleted — the passage post was marked for deletion too.', 'success');
+                    } else if (!e.target.checked && editorDeleteSet.has(passageIdx)) {
+                        editorDeleteSet.delete(passageIdx); affected.push(passageIdx);
+                        showToast('Passage Group', 'Passage question restored — its passage post was restored too.', 'success');
+                    }
+                }
+            }
+            // Re-render the whole panel if the toggle cascaded to other cards.
+            if (affected.length) {
+                renderBasePanel();
+                updateEditorStats();
+                updateTabCounts();
+                updateLiveJsonPreview();
+                return;
+            }
 
             // Rebuild this card in place so the badge + border state update cleanly
             const card = e.target.closest('.qfv-card');
@@ -2589,7 +2814,7 @@ function figLoadJsonData(data, fileName, source) {
     figState.slots = {};
 
     document.getElementById('fig-json-name').textContent =
-        `\u2713 ${figState.fileName} \u2014 ${data.posts.length} questions`;
+        `\u2713 ${figState.fileName} \u2014 ${aimcqCountLabel(data.posts)}`;
     document.getElementById('fig-json-name').classList.add('text-indigo-700', 'font-bold');
     document.getElementById('fig-step-pdf').classList.remove('hidden');
     document.getElementById('fig-step-save').classList.remove('hidden');
@@ -2601,7 +2826,7 @@ function figLoadJsonData(data, fileName, source) {
     figPopulateTopics();
     figRenderQuestionList();
     lucide.createIcons();
-    showToast('JSON Loaded', `${data.posts.length} questions ready for figure updates.`, 'success');
+    showToast('JSON Loaded', `${aimcqCountLabel(data.posts)} ready for figure updates.`, 'success');
 }
 
 // JSON file input + drag/drop
@@ -4460,6 +4685,7 @@ async function ghCommitJsonFile(file, dataObj, commitMessage) {
             'and enter a Personal Access Token (repo scope).');
     }
     const json = JSON.stringify(aimcqCanonicalizeExport(dataObj), null, 2);
+    aimcqWarnPassageIssues(dataObj, file && file.name);
     // base64-encode the UTF-8 content (handles Hindi and all Unicode).
     const bytes = new TextEncoder().encode(json);
     let bin = '';
