@@ -1,0 +1,163 @@
+# AI MCQs JSON Tool — GitHub + jsDelivr Hosting Guide
+
+This package converts the single-file `mcqs-json-tool-v15.html` into CDN-hostable
+assets, so you embed the tool with one `<div>` + one `<script>` — the same shape
+as your Smartboard tool, but with **no Cloudflare Worker and no JWT**. The files
+are public on GitHub and delivered by jsDelivr's CDN.
+
+## Files in this package
+
+| File | Where it goes | Purpose |
+|------|---------------|---------|
+| `mcqs-tool.js` | GitHub → jsDelivr | **The only URL you reference.** Loader: injects the tool's markup, auto-loads the CSS + core from the same folder, and pulls in every library the tool needs (Tailwind, JSZip, Lucide, KaTeX, PDF.js, Cropper.js). |
+| `mcqs-core.js` | GitHub → jsDelivr | The tool's logic (loaded automatically by `mcqs-tool.js`). Kept as a separate file so all the tool's buttons/handlers keep working unchanged. |
+| `mcqs-tool.css` | GitHub → jsDelivr | The tool's styles (loaded automatically). |
+| `embed-snippet.html` | — | Copy-paste embed for any website. |
+| `blogger-embed-mcqs.xml` | Blogger Theme editor | Full Blogger theme that mounts the tool full-page. |
+| `test-local.html` | your computer | Verify the 3 files locally before pushing. |
+
+> The three CDN files (`mcqs-tool.js`, `mcqs-core.js`, `mcqs-tool.css`) **must live
+> in the same folder** in your repo, because the loader finds its siblings relative
+> to its own URL.
+
+---
+
+## Step 1 — Put the 3 files in a GitHub repo
+
+1. Create a repo (e.g. `mcq-tool`) — public.
+2. Upload `mcqs-tool.js`, `mcqs-core.js`, `mcqs-tool.css` to the repo root
+   (or all into one sub-folder, e.g. `/dist`).
+3. **Create a release tag** (Releases → Draft a new release → tag `v1.0`).
+   Using a tag keeps the CDN version stable and caches well. (You *can* use a
+   branch like `main`, but jsDelivr caches it for up to 12 h, so updates are slow
+   to appear.)
+
+---
+
+## Step 2 — Get the jsDelivr URL
+
+jsDelivr serves any public GitHub file at:
+
+```
+https://cdn.jsdelivr.net/gh/USER/REPO@VERSION/PATH
+```
+
+So your loader URL is one of:
+
+```
+https://cdn.jsdelivr.net/gh/USER/REPO@v1.0/mcqs-tool.js          (files in repo root)
+https://cdn.jsdelivr.net/gh/USER/REPO@v1.0/dist/mcqs-tool.js     (files in /dist)
+```
+
+Replace `USER`, `REPO`, and `v1.0` with your own. You only ever hard-code this
+**one** URL — the loader derives the core + css URLs from it automatically.
+
+---
+
+## Step 3 — Embed it
+
+### Any website
+
+```html
+<div class="mcqs-page-wrap">
+  <div id="mcqs-host" data-height="100vh"></div>
+</div>
+<script src="https://cdn.jsdelivr.net/gh/USER/REPO@v1.0/mcqs-tool.js"></script>
+```
+
+### Blogger
+
+Open **Theme → ⋮ → Edit HTML**, replace the whole theme with
+`blogger-embed-mcqs.xml`, edit the loader URL inside it, and Save. The theme
+hides Blogger's own header/footer so the tool fills the page (same approach as
+your Smartboard theme).
+
+---
+
+## How it works (the embed flow)
+
+```
+Your page
+  │  <script src=".../mcqs-tool.js">  runs
+  │     1. reads its own URL → knows the CDN folder
+  │     2. finds <div id="mcqs-host"> (or [data-mcqs-tool], or #smartboard-host)
+  │     3. injects the tool's HTML into that div
+  │     4. adds <link> mcqs-tool.css  (same folder)
+  │     5. injects Tailwind / JSZip / Lucide / KaTeX / PDF.js / Cropper
+  │     6. adds <script> mcqs-core.js (same folder) → tool boots
+  ▼
+Tool appears inside the host div ✅
+```
+
+### The host `<div>`
+- `id="mcqs-host"` is the default the loader looks for.
+- `[data-mcqs-tool]` also works (`<div data-mcqs-tool data-height="100vh"></div>`).
+- `id="smartboard-host"` also works, so you can reuse an existing Smartboard
+  page layout without renaming anything.
+- `data-height` is applied as a **min-height** (`"100vh"`, `"640"`, `"640px"`).
+  The tool itself scrolls naturally, so height is not critical.
+
+### Manual mount (optional)
+The loader auto-mounts on page load. To control it yourself:
+
+```html
+<div id="my-spot"></div>
+<script src="https://cdn.jsdelivr.net/gh/USER/REPO@v1.0/mcqs-tool.js"></script>
+<script>MCQTool.mount(document.getElementById('my-spot'));</script>
+```
+
+---
+
+## Updating the tool later
+
+1. Edit the file(s) in your repo.
+2. Cut a new release tag (e.g. `v1.1`).
+3. Change `@v1.0` → `@v1.1` in your embed `<script>` URL.
+
+If you embedded with `@main` instead of a tag, you can force jsDelivr to refresh
+its cache by visiting `https://purge.jsdelivr.net/gh/USER/REPO@main/mcqs-tool.js`.
+
+---
+
+## Notes & gotchas
+
+- **Dedicated page recommended.** The tool uses Tailwind's runtime CDN, whose
+  base reset applies page-wide — exactly as in the original single-file tool.
+  Give it its own page (the Blogger theme already hides other page chrome), just
+  like the Smartboard.
+- **All libraries auto-load.** You don't add Tailwind/JSZip/etc. yourself; the
+  loader injects them (and skips any your page already has).
+- **Nothing was rewritten.** `mcqs-core.js` is the original tool script verbatim
+  and `mcqs-tool.css` is the original styles verbatim (plus a few additive,
+  scoped rules at the end of the CSS). All tabs — Split, Combine, Quiz Builder,
+  Question Editor, Figure Updater, Frontend Builder, GitHub sync — behave exactly
+  as before.
+- **No flash of unstyled HTML.** The loader fetches `mcqs-tool.css` + Tailwind
+  first, mounts the tool hidden behind a small loading spinner, and only reveals
+  it once the styles are applied — so the raw markup never paints unstyled.
+- **`aimcq.js` is unrelated.** The Frontend Builder still generates quiz pages
+  that reference `aimcq.js` in *your* quiz repo; that is the published quiz
+  player and is separate from these tool files.
+
+---
+
+## v1.3 — Passage (reading-comprehension) support
+
+The tool now fully preserves aimcq passage structure end-to-end:
+
+- **Export canonicalization keeps passage keys.** Questions keep
+  `_aimcq_is_passage_question` / `_aimcq_passage_id`, and `post_type:"passage"`
+  posts keep `_aimcq_passage_content_hi`, `_aimcq_passage_display_title_en/_hi`
+  and `_aimcq_passage_translation_custom_prompt`. (Previously these were
+  stripped, so quizzes exported by the tool lost their passage box in the
+  aimcq engine.)
+- **Split is passage-aware.** A passage post and all of its linked questions
+  always land in the same output file; the chunk size counts questions and the
+  passage post rides along.
+- **Question Editor shows passage badges** (purple "Passage" / "Passage Q → id")
+  and keeps groups consistent: deleting a passage also marks its linked
+  questions, deleting the last linked question also removes the now-orphan
+  passage post, and undeleting restores the group.
+- **Export-time validation.** Every download and GitHub commit checks passage
+  integrity and shows a warning toast if questions reference a passage that is
+  missing from the file (or a passage has no linked questions).
