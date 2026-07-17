@@ -175,3 +175,16 @@ the CDN and Load buttons:
   listing, and unlinks the file if it was the currently linked Editor/Figures
   file. Requires a token with `repo` scope (the button sends you to the
   Credentials tab if none is saved).
+
+### v1.3.2 — Browse & Load tab: folder Download + Delete
+
+Folder rows in the **Browse & Load** tab now have the same two buttons
+(between the folder name and the chevron):
+
+- **Download (green)** — recursively fetches every file inside the folder
+  (including subfolders, binary-safe for images) and saves it as
+  `foldername.zip`, with a progress counter on the button.
+- **Delete (red)** — permanently deletes the folder and ALL files inside it,
+  with the same two-step arm/confirm ("Sure?", 4 s auto-disarm), per-file
+  progress on the button, automatic unlinking of any linked Editor/Figures
+  file that lived inside the folder, and a listing refresh afterwards.
