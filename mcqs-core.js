@@ -4575,7 +4575,22 @@ async function figGitHubBrowse() {
             row.className = 'gd-file-row';
             row.innerHTML = '<i data-lucide="folder" class="w-4 h-4 text-amber-500"></i>' +
                 `<span class="gd-file-row-name">${escapeHtml(f.name)}</span>` +
+                `<span class="gd-file-row-dl" title="Download this folder as a ZIP">` +
+                '<i data-lucide="download" class="w-3 h-3"></i></span>' +
+                `<span class="gd-file-row-del" title="Permanently delete this folder and ALL files inside it from GitHub">` +
+                '<i data-lucide="trash-2" class="w-3 h-3"></i></span>' +
                 '<i data-lucide="chevron-right" class="w-3.5 h-3.5 text-gray-300"></i>';
+            // Download folder as ZIP — does NOT navigate into it.
+            row.querySelector('.gd-file-row-dl').addEventListener('click', e => {
+                e.stopPropagation();
+                ghBrowseDownloadFolder(repo, branch, f.path, f.name, e.currentTarget);
+            });
+            // Delete folder (two-step inline confirm) — does NOT navigate.
+            row.querySelector('.gd-file-row-del').addEventListener('click', e => {
+                e.stopPropagation();
+                ghBrowseDeleteFolder(repo, branch, f, e.currentTarget);
+            });
+            // Clicking the rest of the row navigates into the folder.
             row.addEventListener('click', () => {
                 document.getElementById('fig-gh-pick-path').value = f.path;
                 figGitHubBrowse();
@@ -4791,6 +4806,134 @@ function ghBrowseDeleteFile(repo, branch, f, btnEl) {
             showToast('Delete failed', err.message || String(err), 'error');
             btnEl.innerHTML = '<i data-lucide="trash-2" class="w-3 h-3"></i>';
             lucide.createIcons();
+        }
+    })();
+}
+
+// Fetch a repo file's RAW BYTES (binary-safe — needed so non-text assets
+// like images inside a folder survive a folder→ZIP download intact).
+async function ghFetchFileBytes(repo, branch, path) {
+    const url = `https://api.github.com/repos/${repo}/contents/${encodeURI(path)}` +
+        `?ref=${encodeURIComponent(branch)}`;
+    const resp = await fetch(url, { headers: figGitHubHeaders() });
+    if (!resp.ok) {
+        let msg = 'HTTP ' + resp.status;
+        try { const j = await resp.json(); msg = j.message || msg; } catch (e) {}
+        throw new Error(msg);
+    }
+    const meta = await resp.json();
+    if (Array.isArray(meta) || meta.type !== 'file') throw new Error('That path is not a file.');
+    if (meta.encoding === 'base64' && meta.content) {
+        const bin = atob(meta.content.replace(/\n/g, ''));
+        return Uint8Array.from(bin, c => c.charCodeAt(0));
+    }
+    if (meta.download_url) {
+        const dl = await fetch(meta.download_url);
+        return new Uint8Array(await dl.arrayBuffer());
+    }
+    throw new Error('File content is empty or unsupported.');
+}
+
+// Download an entire repo folder (recursively) as a ZIP. Files keep their
+// paths relative to the folder. Nothing is loaded into any tab.
+async function ghBrowseDownloadFolder(repo, branch, folderPath, folderName, btnEl) {
+    const origHTML = btnEl ? btnEl.innerHTML : '';
+    const setBtn = html => { if (btnEl) { btnEl.innerHTML = html; lucide.createIcons(); } };
+    setBtn('<i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i>');
+    try {
+        const files = await ghCollectFolderFiles(repo, branch, folderPath);
+        if (!files.length) { showToast('Empty folder', 'No files found inside "' + folderName + '".', 'error'); return; }
+        const zip = new JSZip();
+        let done = 0, failed = 0;
+        for (const f of files) {
+            try {
+                const bytes = await ghFetchFileBytes(repo, branch, f.path);
+                // Path inside the zip: relative to the downloaded folder.
+                const rel = f.path.startsWith(folderPath + '/')
+                    ? f.path.slice(folderPath.length + 1) : f.name;
+                zip.file(folderName + '/' + rel, bytes);
+            } catch (e) { failed++; console.warn('Could not fetch', f.path, e.message); }
+            done++;
+            setBtn('<span style="font-size:10px;font-weight:700;">' + done + '/' + files.length + '</span>');
+        }
+        const blob = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = folderName + '.zip';
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a); URL.revokeObjectURL(url);
+        showToast(failed ? 'Downloaded (partial)' : 'Downloaded',
+            failed ? (done - failed) + ' file(s) zipped, ' + failed + ' failed.'
+                   : '"' + folderName + '.zip" (' + files.length + ' file(s)) saved to your device.',
+            failed ? 'error' : 'success');
+    } catch (err) {
+        showToast('Download failed', err.message || String(err), 'error');
+    } finally {
+        setBtn(origHTML);
+    }
+}
+
+// Two-step inline confirm + permanent delete of a folder AND everything in
+// it. Same arm/auto-disarm pattern as the single-file delete; the second
+// click deletes every file (with progress on the button), unlinks any
+// linked Editor/Figures file that lived inside the folder, and refreshes.
+function ghBrowseDeleteFolder(repo, branch, f, btnEl) {
+    if (!btnEl) return;
+    if (!ghJsonCreds.token) {
+        showToast('Token required', 'Deleting needs a GitHub token (repo scope). Open the Credentials tab.', 'error');
+        if (typeof ghSwitchTab === 'function') ghSwitchTab('creds');
+        return;
+    }
+    if (!btnEl.classList.contains('confirm')) {
+        btnEl.classList.add('confirm');
+        btnEl.innerHTML = '<i data-lucide="alert-triangle" class="w-3 h-3"></i> Sure?';
+        btnEl.title = 'Click again to PERMANENTLY delete folder "' + f.name + '" and ALL files inside it from ' + repo + '@' + branch;
+        lucide.createIcons();
+        btnEl.__ghDelTimer = setTimeout(function () {
+            btnEl.classList.remove('confirm');
+            btnEl.innerHTML = '<i data-lucide="trash-2" class="w-3 h-3"></i>';
+            btnEl.title = 'Permanently delete this folder and ALL files inside it from GitHub';
+            lucide.createIcons();
+        }, 4000);
+        return;
+    }
+    clearTimeout(btnEl.__ghDelTimer);
+    btnEl.classList.remove('confirm');
+    const setBtn = html => { btnEl.innerHTML = html; lucide.createIcons(); };
+    setBtn('<i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i>');
+    (async function () {
+        try {
+            const files = await ghCollectFolderFiles(repo, branch, f.path);
+            if (!files.length) {
+                showToast('Empty folder', 'Folder appears empty — nothing to delete.', 'error');
+                await figGitHubBrowse();
+                return;
+            }
+            let deleted = 0, failed = 0;
+            for (const file of files) {
+                try {
+                    await ghDeleteSingleFile(repo, branch, file.path, file.sha, file.name);
+                    deleted++;
+                } catch (e) { console.warn('Could not delete', file.path, e.message); failed++; }
+                setBtn('<span style="font-size:10px;font-weight:700;">' + (deleted + failed) + '/' + files.length + '</span>');
+            }
+            showToast(failed ? 'Partial delete' : 'Folder deleted',
+                failed ? deleted + ' file(s) deleted, ' + failed + ' failed.'
+                       : 'Folder "' + f.name + '" and ' + deleted + ' file(s) permanently removed from ' + repo + '@' + branch + '.',
+                failed ? 'error' : 'success');
+            // Unlink Editor/Figures files that lived inside the deleted folder.
+            var inside = function (l) {
+                return l && l.repo === repo && l.branch === branch
+                    && (l.path === f.path || (l.path || '').indexOf(f.path + '/') === 0);
+            };
+            if (typeof editorGitHubFile !== 'undefined' && inside(editorGitHubFile)
+                && typeof editorUnlinkGitHub === 'function') editorUnlinkGitHub();
+            if (typeof figState !== 'undefined' && inside(figState.githubFile)
+                && typeof figUnlinkGitHub === 'function') figUnlinkGitHub();
+            await figGitHubBrowse();
+        } catch (err) {
+            showToast('Delete failed', err.message || String(err), 'error');
+            setBtn('<i data-lucide="trash-2" class="w-3 h-3"></i>');
         }
     })();
 }
@@ -6199,7 +6342,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v1.3 (passage support) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v1.3.2 (passage support + browse file/folder download & delete) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
