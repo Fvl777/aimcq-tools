@@ -6041,3 +6041,51 @@ function qbBuildJson() {
 })();
 
 
+
+/* ====================================================================
+   BOOT BEACON + GITHUB PICKER RESILIENCE  (v1.3)
+   --------------------------------------------------------------------
+   1. Logs a version line so you can verify in DevTools which core the
+      CDN actually served. If you do NOT see this line in the console,
+      the file on the CDN is stale, truncated, or failed to execute —
+      that is why inline onclick handlers (like the GitHub buttons) do
+      nothing.
+   2. Explicitly exposes the GitHub picker functions on window and adds
+      addEventListener bindings for the three "Load from GitHub"
+      buttons, so the picker opens even in environments that block
+      inline onclick handlers (strict CSP). Opening/closing the modal is
+      idempotent, so double-firing alongside the inline handler is safe.
+   ==================================================================== */
+(function () {
+    try {
+        if (typeof figGitHubOpenPicker === 'function') {
+            window.figGitHubOpenPicker  = figGitHubOpenPicker;
+            window.figGitHubClosePicker = figGitHubClosePicker;
+        }
+        var bind = function (id, target) {
+            var el = document.getElementById(id);
+            if (el && !el.__mcqsGhBound && typeof figGitHubOpenPicker === 'function') {
+                el.__mcqsGhBound = true;
+                el.addEventListener('click', function () { figGitHubOpenPicker(target); });
+            }
+        };
+        bind('editor-btn-load-github', 'editor');
+        bind('qb-btn-load-github', 'quizbuilder');
+        bind('fig-btn-load-github', undefined);
+        var closeBtnModal = document.getElementById('fig-gh-picker-modal');
+        if (closeBtnModal && typeof figGitHubClosePicker === 'function') {
+            var backdrop = closeBtnModal.querySelector('.gd-modal-backdrop');
+            if (backdrop && !backdrop.__mcqsGhBound) {
+                backdrop.__mcqsGhBound = true;
+                backdrop.addEventListener('click', figGitHubClosePicker);
+            }
+        }
+        if (window.console && console.info) {
+            console.info('[mcqs-tool] core v1.3 (passage support) loaded OK — GitHub picker ready.');
+        }
+    } catch (e) {
+        if (window.console && console.error) {
+            console.error('[mcqs-tool] boot check failed:', e && e.message);
+        }
+    }
+})();
