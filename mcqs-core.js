@@ -4590,11 +4590,25 @@ async function figGitHubBrowse() {
                 `<span class="gd-file-row-name">${escapeHtml(f.name)}</span>` +
                 `<span class="gd-file-row-cdn" title="Copy jsDelivr CDN link">` +
                 '<i data-lucide="link" class="w-3 h-3"></i> CDN</span>' +
+                `<span class="gd-file-row-dl" title="Download this file">` +
+                '<i data-lucide="download" class="w-3 h-3"></i></span>' +
+                `<span class="gd-file-row-del" title="Permanently delete this file from GitHub">` +
+                '<i data-lucide="trash-2" class="w-3 h-3"></i></span>' +
                 '<span class="gd-file-row-load">Load</span>';
             // Copy-CDN: copies the link, does NOT load the file.
             row.querySelector('.gd-file-row-cdn').addEventListener('click', e => {
                 e.stopPropagation();
                 ghCopyToClipboard(cdnUrl, 'jsDelivr CDN link');
+            });
+            // Download: saves the file as-is (no canonicalization), does NOT load it.
+            row.querySelector('.gd-file-row-dl').addEventListener('click', e => {
+                e.stopPropagation();
+                ghBrowseDownloadFile(repo, branch, f.path, f.name, e.currentTarget);
+            });
+            // Delete: two-step inline confirm, then permanently removes from GitHub.
+            row.querySelector('.gd-file-row-del').addEventListener('click', e => {
+                e.stopPropagation();
+                ghBrowseDeleteFile(repo, branch, f, e.currentTarget);
             });
             // Clicking the rest of the row loads the file.
             row.querySelector('.gd-file-row-load').addEventListener('click', e => {
@@ -4675,6 +4689,110 @@ async function figGitHubLoadFile(repo, branch, path, name) {
     } catch (err) {
         showToast('Load failed', err.message || String(err), 'error');
     }
+}
+
+/* --------------------------------------------------------------------
+   BROWSE-TAB ROW ACTIONS: Download + permanent Delete  (v1.3)
+   -------------------------------------------------------------------- */
+
+// Fetch a repo file's raw text via the contents API (works for private
+// repos through figGitHubHeaders; falls back to download_url for >1 MB).
+async function ghFetchFileText(repo, branch, path) {
+    const url = `https://api.github.com/repos/${repo}/contents/${encodeURI(path)}` +
+        `?ref=${encodeURIComponent(branch)}`;
+    const resp = await fetch(url, { headers: figGitHubHeaders() });
+    if (!resp.ok) {
+        let msg = 'HTTP ' + resp.status;
+        try { const j = await resp.json(); msg = j.message || msg; } catch (e) {}
+        throw new Error(msg);
+    }
+    const meta = await resp.json();
+    if (Array.isArray(meta) || meta.type !== 'file') throw new Error('That path is not a file.');
+    if (meta.encoding === 'base64' && meta.content) {
+        const bin = atob(meta.content.replace(/\n/g, ''));
+        const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+        return new TextDecoder('utf-8').decode(bytes);
+    }
+    if (meta.download_url) {
+        const dl = await fetch(meta.download_url);
+        return await dl.text();
+    }
+    throw new Error('File content is empty or unsupported.');
+}
+
+// Download a browsed file AS-IS (byte-faithful text, no canonicalization,
+// nothing is loaded into any tab).
+async function ghBrowseDownloadFile(repo, branch, path, name, btnEl) {
+    const origHTML = btnEl ? btnEl.innerHTML : '';
+    if (btnEl) { btnEl.innerHTML = '<i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i>'; lucide.createIcons(); }
+    try {
+        const text = await ghFetchFileText(repo, branch, path);
+        const blob = new Blob([text], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = name;
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a); URL.revokeObjectURL(url);
+        showToast('Downloaded', `"${name}" saved to your device.`, 'success');
+    } catch (err) {
+        showToast('Download failed', err.message || String(err), 'error');
+    } finally {
+        if (btnEl) { btnEl.innerHTML = origHTML; lucide.createIcons(); }
+    }
+}
+
+// Two-step inline confirm + permanent delete for a browsed file.
+// First click arms the button (turns into "Sure?"; auto-disarms after 4 s);
+// second click within that window deletes the file from the repository,
+// unlinks it if it is the currently linked Editor/Figures file, and
+// refreshes the listing.
+function ghBrowseDeleteFile(repo, branch, f, btnEl) {
+    if (!btnEl) return;
+    if (!ghJsonCreds.token) {
+        showToast('Token required', 'Deleting needs a GitHub token (repo scope). Open the Credentials tab.', 'error');
+        if (typeof ghSwitchTab === 'function') ghSwitchTab('creds');
+        return;
+    }
+    // Step 1: arm.
+    if (!btnEl.classList.contains('confirm')) {
+        btnEl.classList.add('confirm');
+        btnEl.innerHTML = '<i data-lucide="alert-triangle" class="w-3 h-3"></i> Sure?';
+        btnEl.title = 'Click again to PERMANENTLY delete "' + f.name + '" from ' + repo + '@' + branch;
+        lucide.createIcons();
+        btnEl.__ghDelTimer = setTimeout(function () {
+            btnEl.classList.remove('confirm');
+            btnEl.innerHTML = '<i data-lucide="trash-2" class="w-3 h-3"></i>';
+            btnEl.title = 'Permanently delete this file from GitHub';
+            lucide.createIcons();
+        }, 4000);
+        return;
+    }
+    // Step 2: execute.
+    clearTimeout(btnEl.__ghDelTimer);
+    btnEl.classList.remove('confirm');
+    btnEl.innerHTML = '<i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i>';
+    lucide.createIcons();
+    (async function () {
+        try {
+            await ghDeleteSingleFile(repo, branch, f.path, f.sha, f.name);
+            showToast('Deleted', '"' + f.name + '" permanently removed from ' + repo + '@' + branch + '.', 'success');
+            // If the deleted file is the currently linked GitHub file of the
+            // Editor or Figure Updater, unlink it so later "Update on GitHub"
+            // commits don't fail against a missing file.
+            var same = function (l) {
+                return l && l.repo === repo && l.branch === branch && l.path === f.path;
+            };
+            if (typeof editorGitHubFile !== 'undefined' && same(editorGitHubFile)
+                && typeof editorUnlinkGitHub === 'function') editorUnlinkGitHub();
+            if (typeof figState !== 'undefined' && same(figState.githubFile)
+                && typeof figUnlinkGitHub === 'function') figUnlinkGitHub();
+            await figGitHubBrowse();   // refresh the listing
+        } catch (err) {
+            showToast('Delete failed', err.message || String(err), 'error');
+            btnEl.innerHTML = '<i data-lucide="trash-2" class="w-3 h-3"></i>';
+            lucide.createIcons();
+        }
+    })();
 }
 
 // Shared: commit a JS object as a JSON file to GitHub (creates or updates).
