@@ -161,3 +161,17 @@ The tool now fully preserves aimcq passage structure end-to-end:
 - **Export-time validation.** Every download and GitHub commit checks passage
   integrity and shows a warning toast if questions reference a passage that is
   missing from the file (or a passage has no linked questions).
+
+### v1.3.1 — Browse & Load tab: per-file Download + Delete
+
+Each `.json` row in the GitHub modal's **Browse & Load** tab now shows, between
+the CDN and Load buttons:
+
+- **Download (green)** — saves the file to your device exactly as it is on
+  GitHub (no canonicalization, nothing is loaded into the tool).
+- **Delete (red)** — permanently deletes the file from the repository. Two-step
+  safety: the first click arms the button ("Sure?", auto-disarms after 4 s);
+  the second click within that window commits the delete, refreshes the
+  listing, and unlinks the file if it was the currently linked Editor/Figures
+  file. Requires a token with `repo` scope (the button sends you to the
+  Credentials tab if none is saved).
