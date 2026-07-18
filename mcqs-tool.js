@@ -677,6 +677,17 @@
                     <!-- Figure slots -->
                     <div class="fig-slots-grid" id="fig-slots-grid"></div>
 
+                    <!-- Question figure position -->
+                    <div id="fig-qpos-panel" class="hidden">
+                        <div class="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                            <h4 class="font-semibold text-gray-800 text-sm flex items-center gap-1.5">
+                                <i data-lucide="move-vertical" class="w-4 h-4 text-indigo-600"></i> Figure Position in Question
+                            </h4>
+                            <span class="text-[11px] text-gray-400">Place the figure anywhere between the question's lines — preview updates live.</span>
+                        </div>
+                        <div id="fig-qpos-options" class="fig-qpos-box custom-scrollbar"></div>
+                    </div>
+
                     <!-- Live preview -->
                     <div>
                         <div class="flex items-center justify-between mb-2">
