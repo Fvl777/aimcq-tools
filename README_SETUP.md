@@ -54,6 +54,22 @@ Replace `USER`, `REPO`, and `v1.0` with your own. You only ever hard-code this
 
 ---
 
+## Figure position — place figures anywhere in the question
+
+Exam papers often show the diagram *between* the question's lines (e.g. after
+"Consider the following statements…" but before statement A). The Figure
+Updater supports this: once a question figure is cropped/set, a
+**"Figure Position in Question"** panel appears listing every line of the
+question. Pick **Auto** (default — replaces an `[image here: ...]` placeholder
+or the existing figure, else appends at the end), **At the very start**,
+**After line N** (each line shown with a text preview), or **At the very end**.
+The live preview updates instantly, and Apply writes the figure at that exact
+spot in both English and Hindi content (line number clamped for the shorter
+side). Re-applying at a different position moves the figure — never duplicates
+it.
+
+---
+
 ## Instant CDN updates (forced jsDelivr purge)
 
 jsDelivr normally caches GitHub branch URLs for up to ~12 hours. The tool now
