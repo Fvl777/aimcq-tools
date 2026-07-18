@@ -5002,7 +5002,15 @@ async function figUpdateToGitHub() {
     lucide.createIcons();
     try {
         f.sha = await ghCommitJsonFile(f, figState.data, 'Update MCQ figures — ' + f.name);
-        showToast('Saved to GitHub', `Committed to ${f.repo}@${f.branch} — ${f.path}.`, 'success');
+        // Force-purge jsDelivr so the updated figures JSON is live immediately.
+        btn.innerHTML = '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Purging CDN...';
+        lucide.createIcons();
+        try {
+            await jsdelivrPurgeFile(f.repo, f.branch, f.path);
+            showToast('Saved & Live on CDN', `Committed to ${f.repo}@${f.branch} — ${f.path}. jsDelivr cache purged — changes are live NOW.`, 'success');
+        } catch (purgeErr) {
+            showToast('Saved to GitHub (purge failed)', `Commit succeeded, but: ${purgeErr.message || purgeErr}`, 'info');
+        }
     } catch (err) {
         showToast('Update failed', err.message || String(err), 'error');
     } finally {
@@ -5556,9 +5564,20 @@ async function editorUpdateToGitHub() {
         editorGitHubFile.sha = await ghCommitJsonFile(
             editorGitHubFile, editorExportData,
             'Update MCQ JSON — ' + editorGitHubFile.name);
-        showToast('Saved to GitHub',
-            `Committed to ${editorGitHubFile.repo}@${editorGitHubFile.branch} — ${editorGitHubFile.path}.`,
-            'success');
+        // Force-purge the jsDelivr cache so the committed change is served
+        // immediately on the existing CDN URL (no ~12h propagation wait).
+        btn.innerHTML = '<i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i> Purging CDN cache...';
+        lucide.createIcons();
+        try {
+            await jsdelivrPurgeFile(editorGitHubFile.repo, editorGitHubFile.branch, editorGitHubFile.path);
+            showToast('Saved & Live on CDN',
+                `Committed to ${editorGitHubFile.repo}@${editorGitHubFile.branch} — ${editorGitHubFile.path}. jsDelivr cache purged — changes are live NOW.`,
+                'success');
+        } catch (purgeErr) {
+            showToast('Saved to GitHub (purge failed)',
+                `Commit succeeded, but: ${purgeErr.message || purgeErr}`,
+                'info');
+        }
     } catch (err) {
         showToast('Update failed', err.message || String(err), 'error');
     } finally {
@@ -6343,7 +6362,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v1.3.6 (AI explanation follows file language — Hindi-only files fixed) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v1.3.7 (jsDelivr force-purge on GitHub update — changes live instantly) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -6896,3 +6915,71 @@ function qeAiApply(mode) {
     // re-sync chips shortly after boot so the settings card reflects storage.
     setTimeout(function () { try { aiLoadCfg(); } catch (e) {} }, 800);
 })();
+
+// ============================================================
+// ============ jsDelivr CDN CACHE PURGE ======================
+// ============================================================
+// jsDelivr caches GitHub files aggressively (up to 12h for branch
+// URLs). After committing a JSON to GitHub we force-purge the CDN
+// so the change is served IMMEDIATELY on the same URL. We purge
+// both URL forms that readers might use:
+//     https://cdn.jsdelivr.net/gh/{repo}@{branch}/{path}   (pinned)
+//     https://cdn.jsdelivr.net/gh/{repo}/{path}            (default branch)
+// The purge endpoint mirrors the CDN path:
+//     https://purge.jsdelivr.net/gh/{repo}@{branch}/{path}
+
+async function jsdelivrPurgeFile(repo, branch, path) {
+    const enc = encodeURI(path);
+    const targets = [
+        `https://purge.jsdelivr.net/gh/${repo}@${branch}/${enc}`,
+        `https://purge.jsdelivr.net/gh/${repo}/${enc}`,
+    ];
+    const results = await Promise.allSettled(targets.map(u =>
+        fetch(u, { method: 'GET', cache: 'no-store' }).then(r => {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json().catch(() => ({}));
+        })
+    ));
+    const okCount = results.filter(r => r.status === 'fulfilled').length;
+    if (!okCount) {
+        const firstErr = results[0] && results[0].reason;
+        throw new Error('CDN purge failed — ' + ((firstErr && firstErr.message) || 'purge service unreachable') +
+            '. The commit is saved; the CDN will refresh on its own within ~12h, or retry "Purge CDN cache".');
+    }
+    return { purged: okCount, total: targets.length };
+}
+
+// Purge with button busy-state + toasts. Used by the manual buttons.
+async function ghPurgeCdnWithUi(file, btn, label) {
+    if (!file || !file.path) {
+        showToast('No GitHub file', 'Load a JSON from GitHub first.', 'error');
+        return;
+    }
+    let origHTML = null;
+    if (btn) {
+        origHTML = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Purging…';
+        lucide.createIcons();
+    }
+    try {
+        await jsdelivrPurgeFile(file.repo, file.branch, file.path);
+        showToast('CDN Cache Purged', `${label || file.path} — jsDelivr will now serve the latest version immediately.`, 'success');
+    } catch (err) {
+        showToast('CDN Purge Failed', err.message || String(err), 'error');
+    } finally {
+        if (btn && origHTML !== null) {
+            btn.disabled = false;
+            btn.innerHTML = origHTML;
+            lucide.createIcons();
+        }
+    }
+}
+
+// Manual purge buttons (Editor tab + Figure Updater link rows).
+function editorPurgeCdn(btn) {
+    ghPurgeCdnWithUi(typeof editorGitHubFile !== 'undefined' ? editorGitHubFile : null, btn, 'Editor JSON');
+}
+function figPurgeCdn(btn) {
+    ghPurgeCdnWithUi((typeof figState !== 'undefined' && figState.githubFile) ? figState.githubFile : null, btn, 'Figures JSON');
+}
