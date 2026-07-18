@@ -54,6 +54,22 @@ Replace `USER`, `REPO`, and `v1.0` with your own. You only ever hard-code this
 
 ---
 
+## Instant CDN updates (forced jsDelivr purge)
+
+jsDelivr normally caches GitHub branch URLs for up to ~12 hours. The tool now
+**force-purges the jsDelivr cache automatically** every time you use
+**Update to GitHub** (in the Question Editor and the Figure Updater), so the
+committed JSON is served immediately on the same CDN URL — no waiting, no
+version bump needed. Both URL forms are purged:
+`.../gh/USER/REPO@BRANCH/file.json` and `.../gh/USER/REPO/file.json`.
+
+A manual **Purge CDN cache** button also sits next to "Copy CDN link" in the
+GitHub link row of both tabs, for cases where the file was changed outside the
+tool. If the purge service is unreachable the commit still succeeds — you'll
+get a notice and can retry the purge button (or wait for natural expiry).
+
+---
+
 ## AI Question Update (Gemini API)
 
 The **Question Editor** tab includes an AI review workflow powered by Google's
