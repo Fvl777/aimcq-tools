@@ -2480,6 +2480,7 @@ function openQEditor(idx) {
 
     editorConfigureQEditorLangUI(bilingual, soleLang);
     switchQEditorLang('en');
+    if (typeof qeAiOnModalOpen === 'function') qeAiOnModalOpen(enOptions.length);
     document.getElementById('q-editor-modal').classList.remove('hidden');
     document.body.style.overflow = 'hidden';
     lucide.createIcons();
@@ -6342,11 +6343,543 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v1.3.2 (passage support + browse file/folder download & delete) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v1.3.4 (flex height + AI Question Update via Gemini) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
             console.error('[mcqs-tool] boot check failed:', e && e.message);
         }
     }
+})();
+
+// ============================================================
+// ============ AI QUESTION UPDATE (GEMINI API) ===============
+// ============================================================
+// Settings live in the Question Editor tab; the analysis runs
+// inside the per-question edit modal. Flow:
+//   1. User saves a Gemini API key (localStorage only).
+//   2. In the edit modal, "Analyze Question" sends the question,
+//      options, the currently-marked answer, an OPTIONAL user-
+//      suggested option, and the pre-existing explanation (as a
+//      format template) to Gemini.
+//   3. Gemini independently solves the question, cross-checks the
+//      marked answer, verifies the user's suggestion (if any) and
+//      drafts a new explanation that replicates the pre-existing
+//      explanation's exact HTML format.
+//   4. Nothing touches the data until the user clicks Apply, and
+//      even then it only fills the modal — "Save Changes" commits.
+
+const AI_GEMINI_CFG_KEY = 'aimcq_gemini_cfg';
+let aiCfg = { key: '', model: 'gemini-2.5-flash' };
+let qeAiLast = null;          // last analysis result for the open question
+let qeAiBusy = false;
+
+// ---------- config persistence ----------
+function aiLoadCfg() {
+    try {
+        const raw = localStorage.getItem(AI_GEMINI_CFG_KEY);
+        if (raw) {
+            const c = JSON.parse(raw);
+            if (c && typeof c === 'object') {
+                aiCfg.key   = c.key   || '';
+                aiCfg.model = c.model || 'gemini-2.5-flash';
+            }
+        }
+    } catch (e) {}
+    aiSyncSettingsUI();
+    aiUpdateStatusChips();
+}
+
+function aiPersistCfg() {
+    try { localStorage.setItem(AI_GEMINI_CFG_KEY, JSON.stringify(aiCfg)); } catch (e) {}
+}
+
+function aiConfigured() { return !!(aiCfg.key && aiCfg.key.trim()); }
+
+function aiEffectiveModel() { return (aiCfg.model || 'gemini-2.5-flash').trim(); }
+
+// ---------- settings UI ----------
+function aiToggleSettings() {
+    const body = document.getElementById('ai-settings-body');
+    const chev = document.getElementById('ai-settings-chevron');
+    if (!body) return;
+    const open = body.classList.toggle('hidden');
+    if (chev) chev.style.transform = open ? '' : 'rotate(180deg)';
+    if (!open) aiSyncSettingsUI();
+}
+
+function aiSyncSettingsUI() {
+    const keyEl = document.getElementById('ai-api-key');
+    const modelEl = document.getElementById('ai-model');
+    const customEl = document.getElementById('ai-model-custom');
+    if (!keyEl || !modelEl) return;
+    keyEl.value = aiCfg.key || '';
+    const preset = ['gemini-2.5-flash','gemini-2.5-pro','gemini-2.0-flash','gemini-1.5-flash'];
+    if (preset.includes(aiCfg.model)) {
+        modelEl.value = aiCfg.model;
+        if (customEl) { customEl.classList.add('hidden'); customEl.value = ''; }
+    } else {
+        modelEl.value = 'custom';
+        if (customEl) { customEl.classList.remove('hidden'); customEl.value = aiCfg.model || ''; }
+    }
+}
+
+function aiToggleKeyVisibility() {
+    const keyEl = document.getElementById('ai-api-key');
+    const eye = document.getElementById('ai-key-eye');
+    if (!keyEl) return;
+    const show = keyEl.type === 'password';
+    keyEl.type = show ? 'text' : 'password';
+    if (eye) { eye.setAttribute('data-lucide', show ? 'eye-off' : 'eye'); lucide.createIcons(); }
+}
+
+function aiReadSettingsForm() {
+    const keyEl = document.getElementById('ai-api-key');
+    const modelEl = document.getElementById('ai-model');
+    const customEl = document.getElementById('ai-model-custom');
+    const key = keyEl ? keyEl.value.trim() : '';
+    let model = modelEl ? modelEl.value : 'gemini-2.5-flash';
+    if (model === 'custom') model = (customEl && customEl.value.trim()) || 'gemini-2.5-flash';
+    return { key, model };
+}
+
+function aiSaveSettings() {
+    const { key, model } = aiReadSettingsForm();
+    if (!key) { showToast('API Key Missing', 'Paste your Gemini API key first.', 'error'); return; }
+    aiCfg.key = key;
+    aiCfg.model = model;
+    aiPersistCfg();
+    aiUpdateStatusChips();
+    showToast('AI Settings Saved', `Gemini model: ${model}. Key stored in this browser only.`, 'success');
+}
+
+function aiClearSettings() {
+    aiCfg = { key: '', model: 'gemini-2.5-flash' };
+    try { localStorage.removeItem(AI_GEMINI_CFG_KEY); } catch (e) {}
+    aiSyncSettingsUI();
+    aiUpdateStatusChips();
+    const res = document.getElementById('ai-test-result');
+    if (res) res.textContent = '';
+    showToast('AI Settings Cleared', 'Gemini API key removed from this browser.', 'info');
+}
+
+function aiUpdateStatusChips() {
+    const on = aiConfigured();
+    [['ai-settings-status', on ? `Ready · ${aiEffectiveModel()}` : 'Not configured'],
+     ['qe-ai-status',       on ? `Ready · ${aiEffectiveModel()}` : 'Not configured — see AI settings in Editor tab']]
+    .forEach(([id, label]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = label;
+        el.classList.toggle('on', on);
+        el.classList.toggle('off', !on);
+    });
+    const btn = document.getElementById('qe-ai-analyze-btn');
+    if (btn) btn.disabled = !on || qeAiBusy;
+}
+
+async function aiTestConnection() {
+    const { key, model } = aiReadSettingsForm();
+    const res = document.getElementById('ai-test-result');
+    if (!key) { if (res) { res.textContent = 'Enter a key first.'; res.style.color = '#dc2626'; } return; }
+    if (res) { res.textContent = 'Testing…'; res.style.color = '#6b7280'; }
+    try {
+        const out = await aiGeminiRequest('Reply with exactly: OK', { key, model, plainText: true });
+        if (res) {
+            const ok = /OK/i.test(out || '');
+            res.textContent = ok ? `✓ Connected (${model})` : '✓ Reached API (unexpected reply)';
+            res.style.color = '#059669';
+        }
+    } catch (err) {
+        if (res) { res.textContent = '✗ ' + aiFriendlyError(err); res.style.color = '#dc2626'; }
+    }
+}
+
+// ---------- Gemini transport ----------
+async function aiGeminiRequest(prompt, opts) {
+    opts = opts || {};
+    const key = opts.key || aiCfg.key;
+    const model = opts.model || aiEffectiveModel();
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+
+    const body = {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: opts.plainText
+            ? { temperature: 0 }
+            : { temperature: 0.2, responseMimeType: 'application/json' }
+    };
+
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+
+    if (!resp.ok) {
+        let detail = '';
+        try { const j = await resp.json(); detail = (j.error && j.error.message) || ''; } catch (e) {}
+        const err = new Error(detail || `HTTP ${resp.status}`);
+        err.status = resp.status;
+        throw err;
+    }
+
+    const data = await resp.json();
+    const cand = data.candidates && data.candidates[0];
+    const parts = (cand && cand.content && cand.content.parts) || [];
+    const text = parts.map(p => p.text || '').join('');
+    if (!text) {
+        const block = (data.promptFeedback && data.promptFeedback.blockReason) || (cand && cand.finishReason);
+        throw new Error(block ? `Empty response (${block})` : 'Empty response from Gemini');
+    }
+    return text;
+}
+
+function aiParseJson(text) {
+    let t = String(text || '').trim()
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/```\s*$/i, '')
+        .trim();
+    // If extra prose sneaks in, grab the outermost JSON object.
+    if (t[0] !== '{') {
+        const s = t.indexOf('{'), e = t.lastIndexOf('}');
+        if (s !== -1 && e > s) t = t.slice(s, e + 1);
+    }
+    return JSON.parse(t);
+}
+
+function aiFriendlyError(err) {
+    const msg = (err && err.message) || 'Unknown error';
+    if (err && err.status === 400 && /API key/i.test(msg)) return 'Invalid API key.';
+    if (err && (err.status === 401 || err.status === 403)) return 'API key rejected (check key / model access).';
+    if (err && err.status === 404) return 'Model not found — pick another model in AI settings.';
+    if (err && err.status === 429) return 'Rate limit / quota exceeded — wait a moment and retry.';
+    if (/Failed to fetch|NetworkError/i.test(msg)) return 'Network error — check your connection (or an ad-blocker blocking googleapis.com).';
+    return msg;
+}
+
+// ---------- HTML → analysable plain text ----------
+function aiHtmlToPlain(html) {
+    const div = document.createElement('div');
+    div.innerHTML = html || '';
+    div.querySelectorAll('img').forEach(img => {
+        img.replaceWith(document.createTextNode(' [FIGURE: ' + (img.getAttribute('alt') || 'image') + '] '));
+    });
+    div.querySelectorAll('br').forEach(br => br.replaceWith(document.createTextNode('\n')));
+    div.querySelectorAll('p,div,li,tr,h1,h2,h3,h4').forEach(el => el.append(document.createTextNode('\n')));
+    return (div.textContent || '').replace(/\n{3,}/g, '\n\n').replace(/[ \t]+/g, ' ').trim();
+}
+
+// ---------- modal lifecycle ----------
+function qeAiOnModalOpen(optionCount) {
+    qeAiLast = null;
+    qeAiBusy = false;
+    const err = document.getElementById('qe-ai-error');
+    const result = document.getElementById('qe-ai-result');
+    if (err) { err.classList.add('hidden'); err.textContent = ''; }
+    if (result) result.classList.add('hidden');
+    qeAiSetBusy(false);
+
+    // Populate the optional user-suggestion dropdown (A, B, C, …)
+    const sel = document.getElementById('qe-ai-suggest');
+    if (sel) {
+        sel.innerHTML = '<option value="">None — let AI decide independently</option>';
+        for (let i = 0; i < (optionCount || 0); i++) {
+            const letter = OPTION_LETTERS[i] || String(i + 1);
+            const o = document.createElement('option');
+            o.value = String(i);
+            o.textContent = `Option (${letter}) — I think this is correct`;
+            sel.appendChild(o);
+        }
+    }
+    aiUpdateStatusChips();
+}
+
+function qeAiSetBusy(busy) {
+    qeAiBusy = busy;
+    const btn = document.getElementById('qe-ai-analyze-btn');
+    const label = document.getElementById('qe-ai-analyze-label');
+    if (!btn) return;
+    btn.disabled = busy || !aiConfigured();
+    if (label) label.innerHTML = busy
+        ? '<span class="qe-ai-spinner"></span> Analyzing…'
+        : 'Analyze Question';
+}
+
+// ---------- collect the LIVE state of the modal ----------
+function qeAiCollect() {
+    const q = {
+        question: getReValue('en-question'),
+        explanation: getReValue('en-explanation'),
+        options: [],
+        marked: 0,
+        bilingual: editorIsBilingual(),
+        hi: null
+    };
+    document.querySelectorAll('#qe-en-options .opt-editor-wrap').forEach(w => {
+        q.options.push(w.querySelector('.opt-compose').innerHTML);
+    });
+    const checked = document.querySelector('input[name="qe-correct-en"]:checked');
+    q.marked = checked ? parseInt(checked.value) : 0;
+
+    if (q.bilingual) {
+        q.hi = {
+            question: getReValue('hi-question'),
+            explanation: getReValue('hi-explanation'),
+            options: []
+        };
+        document.querySelectorAll('#qe-hi-options .opt-editor-wrap').forEach(w => {
+            q.hi.options.push(w.querySelector('.opt-compose').innerHTML);
+        });
+    }
+    return q;
+}
+
+// ---------- prompt ----------
+function qeAiBuildPrompt(q, suggestIdx) {
+    const L = i => OPTION_LETTERS[i] || String(i + 1);
+    const lines = [];
+
+    lines.push('You are an expert exam-question reviewer and subject-matter solver.');
+    lines.push('Your job: independently solve the multiple-choice question below, then cross-check whether the currently marked correct option is REALLY correct. Be careful and rigorous — do not assume the marked answer is right.');
+    lines.push('');
+    lines.push('QUESTION (plain text; may contain LaTeX between $...$ / \\(...\\) and [FIGURE: ...] placeholders):');
+    lines.push(aiHtmlToPlain(q.question) || '(empty)');
+    lines.push('');
+    lines.push('OPTIONS:');
+    q.options.forEach((o, i) => lines.push(`(${L(i)}) ${aiHtmlToPlain(o) || '(empty)'}`));
+    lines.push('');
+    lines.push(`CURRENTLY MARKED CORRECT OPTION: (${L(q.marked)})  [0-based index ${q.marked}]`);
+
+    if (suggestIdx !== null && suggestIdx !== undefined) {
+        lines.push('');
+        lines.push(`USER SUGGESTION: The user suspects option (${L(suggestIdx)}) [0-based index ${suggestIdx}] is the true correct answer.`);
+        lines.push('Explicitly evaluate this suggestion against your own independent solution and report a verdict in "user_suggestion_verdict" (state clearly whether the user is right or wrong, and why in 1-3 sentences). The user suggestion is a hypothesis to check — do NOT blindly adopt it.');
+    }
+
+    lines.push('');
+    if ((q.explanation || '').trim()) {
+        lines.push('PRE-EXISTING EXPLANATION (raw HTML). THIS DEFINES THE REQUIRED OUTPUT FORMAT:');
+        lines.push('-----BEGIN EXPLANATION HTML-----');
+        lines.push(q.explanation);
+        lines.push('-----END EXPLANATION HTML-----');
+        lines.push('');
+        lines.push('FORMAT RULE (critical): your new English explanation MUST replicate this pre-existing explanation\'s HTML format EXACTLY — same tags, same inline styles/classes, same structure and section order (e.g. a bolded "Correct Answer" line, bullet lists, per-option elimination, tables, LaTeX delimiters, emphasis conventions, approximate length). Change ONLY the substantive content so that it correctly justifies the truly correct option (and, if the format includes it, why the other options are wrong). Do not add new sections that the sample does not have, and do not drop sections it does have.');
+    } else {
+        lines.push('PRE-EXISTING EXPLANATION: (none). Use this simple clean HTML format for the new explanation: <p><b>Correct Answer: (X)</b></p><p>step-by-step justification</p><p>brief note on why the other options are wrong</p>');
+    }
+
+    if (q.bilingual && q.hi) {
+        lines.push('');
+        lines.push('THIS IS A BILINGUAL (English + Hindi) QUESTION. Hindi version:');
+        lines.push('QUESTION (HINDI): ' + (aiHtmlToPlain(q.hi.question) || '(empty)'));
+        q.hi.options.forEach((o, i) => lines.push(`(${L(i)}) [HI] ${aiHtmlToPlain(o) || '(empty)'}`));
+        if ((q.hi.explanation || '').trim()) {
+            lines.push('PRE-EXISTING HINDI EXPLANATION (raw HTML — replicate ITS exact format for "explanation_html_hi"):');
+            lines.push('-----BEGIN HINDI EXPLANATION HTML-----');
+            lines.push(q.hi.explanation);
+            lines.push('-----END HINDI EXPLANATION HTML-----');
+        } else {
+            lines.push('PRE-EXISTING HINDI EXPLANATION: (none). Produce "explanation_html_hi" in Hindi using the same HTML structure as your English explanation.');
+        }
+    }
+
+    lines.push('');
+    lines.push('TASK:');
+    lines.push('1. Solve the question yourself from first principles BEFORE looking at the marked answer.');
+    lines.push('2. Decide the truly correct option (0-based index). If a [FIGURE] is essential and missing, reason from the text as best you can and lower your confidence.');
+    lines.push('3. Compare your answer with the currently marked option.');
+    lines.push('4. Write the new explanation(s) per the FORMAT RULE above, justifying YOUR correct option.');
+    lines.push('');
+    lines.push('Respond with ONLY a single JSON object (no markdown fences, no commentary):');
+    lines.push('{');
+    lines.push('  "correct_index": <0-based integer>,');
+    lines.push('  "is_marked_correct": <true|false>,');
+    lines.push('  "confidence": "high" | "medium" | "low",');
+    lines.push('  "reasoning": "<2-5 sentence plain-text summary of how you solved it and, if the marked answer is wrong, why>",');
+    if (suggestIdx !== null && suggestIdx !== undefined)
+        lines.push('  "user_suggestion_verdict": "<verdict on the user\'s suggested option>",');
+    lines.push('  "explanation_html": "<new English explanation as an HTML string>"' + (q.bilingual ? ',' : ''));
+    if (q.bilingual)
+        lines.push('  "explanation_html_hi": "<new Hindi explanation as an HTML string>"');
+    lines.push('}');
+
+    return lines.join('\n');
+}
+
+// ---------- analyze ----------
+async function qeAiAnalyze() {
+    if (qeAiBusy) return;
+    const errBox = document.getElementById('qe-ai-error');
+    const resultBox = document.getElementById('qe-ai-result');
+    if (errBox) { errBox.classList.add('hidden'); errBox.textContent = ''; }
+
+    if (!aiConfigured()) {
+        if (errBox) {
+            errBox.textContent = 'Gemini API is not configured. Close this modal and open "AI Question Update (Gemini API)" settings in the Question Editor tab.';
+            errBox.classList.remove('hidden');
+        }
+        return;
+    }
+
+    const q = qeAiCollect();
+    if (!q.options.length) {
+        if (errBox) { errBox.textContent = 'This question has no options to analyze.'; errBox.classList.remove('hidden'); }
+        return;
+    }
+
+    const sel = document.getElementById('qe-ai-suggest');
+    const suggestIdx = (sel && sel.value !== '') ? parseInt(sel.value) : null;
+
+    qeAiSetBusy(true);
+    if (resultBox) resultBox.classList.add('hidden');
+
+    try {
+        const raw = await aiGeminiRequest(qeAiBuildPrompt(q, suggestIdx));
+        const parsed = aiParseJson(raw);
+
+        let ci = parseInt(parsed.correct_index);
+        if (isNaN(ci) || ci < 0 || ci >= q.options.length) {
+            throw new Error('AI returned an invalid correct option index.');
+        }
+        if (typeof parsed.explanation_html !== 'string' || !parsed.explanation_html.trim()) {
+            throw new Error('AI did not return an explanation.');
+        }
+
+        qeAiLast = {
+            correct_index: ci,
+            is_marked_correct: (ci === q.marked),
+            confidence: /^(high|medium|low)$/i.test(parsed.confidence || '') ? parsed.confidence.toLowerCase() : 'medium',
+            reasoning: String(parsed.reasoning || '').trim(),
+            suggestion_idx: suggestIdx,
+            user_suggestion_verdict: String(parsed.user_suggestion_verdict || '').trim(),
+            explanation_html: parsed.explanation_html,
+            explanation_html_hi: (q.bilingual && typeof parsed.explanation_html_hi === 'string') ? parsed.explanation_html_hi : null,
+            marked_at_analysis: q.marked,
+            bilingual: q.bilingual
+        };
+        qeAiRenderResult();
+    } catch (err) {
+        if (errBox) {
+            errBox.textContent = 'AI analysis failed: ' + aiFriendlyError(err);
+            errBox.classList.remove('hidden');
+        }
+    } finally {
+        qeAiSetBusy(false);
+    }
+}
+
+function qeAiEsc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function qeAiRenderResult() {
+    const r = qeAiLast;
+    if (!r) return;
+    const L = i => OPTION_LETTERS[i] || String(i + 1);
+    const resultBox = document.getElementById('qe-ai-result');
+    const verdict = document.getElementById('qe-ai-verdict');
+    const sugBox = document.getElementById('qe-ai-suggest-verdict');
+    const reasoning = document.getElementById('qe-ai-reasoning');
+    const prev = document.getElementById('qe-ai-expl-preview');
+    const prevHiWrap = document.getElementById('qe-ai-expl-preview-hi-wrap');
+    const prevHi = document.getElementById('qe-ai-expl-preview-hi');
+
+    const confLabel = { high: 'High confidence', medium: 'Medium confidence', low: 'Low confidence' }[r.confidence] || 'Medium confidence';
+
+    if (verdict) {
+        if (r.is_marked_correct) {
+            verdict.className = 'rounded-xl px-4 py-3 text-sm font-semibold flex items-start gap-2.5 ok';
+            verdict.innerHTML =
+                `<span class="qe-ai-verdict-chip" style="background:#10b981">✓</span>
+                 <span>The marked option <b>(${L(r.marked_at_analysis)})</b> is <b>correct</b>. ${qeAiEsc(confLabel)}.<br>
+                 <span class="font-normal text-xs opacity-80">You can still apply the freshly drafted explanation below.</span></span>`;
+        } else {
+            verdict.className = 'rounded-xl px-4 py-3 text-sm font-semibold flex items-start gap-2.5 bad';
+            verdict.innerHTML =
+                `<span class="qe-ai-verdict-chip" style="background:#f59e0b">!</span>
+                 <span>The marked option <b>(${L(r.marked_at_analysis)})</b> appears to be <b>wrong</b>.
+                 AI determines the correct option is <b>(${L(r.correct_index)})</b>. ${qeAiEsc(confLabel)}.<br>
+                 <span class="font-normal text-xs opacity-80">Use "Apply Correct Option" to re-mark it — the new explanation below matches option (${L(r.correct_index)}).</span></span>`;
+        }
+    }
+
+    if (sugBox) {
+        if (r.suggestion_idx !== null && r.suggestion_idx !== undefined && r.user_suggestion_verdict) {
+            const userRight = r.suggestion_idx === r.correct_index;
+            sugBox.classList.remove('hidden');
+            sugBox.innerHTML = `<b>${userRight ? '✓' : '✗'} Your suggestion — option (${L(r.suggestion_idx)}):</b> ${qeAiEsc(r.user_suggestion_verdict)}`;
+        } else {
+            sugBox.classList.add('hidden');
+            sugBox.innerHTML = '';
+        }
+    }
+
+    if (reasoning) reasoning.textContent = r.reasoning || '—';
+
+    if (prev) {
+        prev.innerHTML = r.explanation_html;
+        try { if (typeof renderKatex === 'function') renderKatex(prev); } catch (e) {}
+    }
+    if (prevHiWrap && prevHi) {
+        if (r.explanation_html_hi) {
+            prevHiWrap.classList.remove('hidden');
+            prevHi.innerHTML = r.explanation_html_hi;
+            try { if (typeof renderKatex === 'function') renderKatex(prevHi); } catch (e) {}
+        } else {
+            prevHiWrap.classList.add('hidden');
+            prevHi.innerHTML = '';
+        }
+    }
+
+    if (resultBox) resultBox.classList.remove('hidden');
+    try { lucide.createIcons(); } catch (e) {}
+}
+
+// ---------- apply ----------
+function qeAiSetRadio(lang, idx) {
+    const radio = document.querySelector(`input[name="qe-correct-${lang}"][value="${idx}"]`);
+    if (radio && !radio.checked) {
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+}
+
+function qeAiApply(mode) {
+    const r = qeAiLast;
+    if (!r) return;
+    const L = i => OPTION_LETTERS[i] || String(i + 1);
+    let didOption = false, didExpl = false;
+
+    if (mode === 'option' || mode === 'both') {
+        qeAiSetRadio('en', r.correct_index);
+        if (r.bilingual) qeAiSetRadio('hi', r.correct_index);
+        didOption = true;
+    }
+    if (mode === 'explanation' || mode === 'both') {
+        setReValue('en-explanation', r.explanation_html);
+        if (r.bilingual && r.explanation_html_hi) setReValue('hi-explanation', r.explanation_html_hi);
+        didExpl = true;
+    }
+
+    const parts = [];
+    if (didOption) parts.push(`correct option → (${L(r.correct_index)})`);
+    if (didExpl) parts.push('explanation updated');
+    showToast('AI Result Applied', parts.join(', ') + '. Click "Save Changes" to commit.', 'success');
+}
+
+// ---------- boot ----------
+(function () {
+    function initAi() { aiLoadCfg(); }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initAi);
+    else initAi();
+    // Show/hide the custom model input (delegated — markup may be injected late).
+    document.addEventListener('change', function (e) {
+        if (e.target && e.target.id === 'ai-model') {
+            const customEl = document.getElementById('ai-model-custom');
+            if (customEl) customEl.classList.toggle('hidden', e.target.value !== 'custom');
+        }
+    });
+    // The tool's markup is injected after this script runs on some pages;
+    // re-sync chips shortly after boot so the settings card reflects storage.
+    setTimeout(function () { try { aiLoadCfg(); } catch (e) {} }, 800);
 })();
