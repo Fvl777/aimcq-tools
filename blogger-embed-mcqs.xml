@@ -30,8 +30,11 @@
     .navbar, .header-outer, .footer-outer, .post-title, .page-header,
     .post-footer, .blog-pager { display:none !important; }
 
-    /* ===== MCQ tool embed container ===== */
-    .mcqs-page-wrap { position:relative; width:100%; flex-grow:1; display:flex; flex-direction:column; }
+    /* ===== MCQ tool embed container =====
+       Height-flexible: the wrap hugs the tool's own content height, so any
+       homepage content placed below it flows immediately after the tool
+       (no flex-grow / forced viewport height = no white gap). */
+    .mcqs-page-wrap { position:relative; width:100%; }
     #mcqs-host { display:block; width:100%; }
   ]]></b:skin>
 
@@ -44,11 +47,13 @@
 
 <body>
 
-  <div id='homepage-content' style='display:flex; flex-direction:column; min-height:100vh;'>
+  <!-- No min-height:100vh here — the section is as tall as its content, so
+       anything you add below the tool sits right under it with no gap. -->
+  <div id='homepage-content'>
     <div class='mcqs-page-wrap'>
       <!-- The loader also recognises id="smartboard-host" if you reuse your
            existing Smartboard layout; "mcqs-host" is the clean default. -->
-      <div data-height='100vh' id='mcqs-host'></div>
+      <div data-height='auto' id='mcqs-host'></div>
     </div>
   </div>
 
