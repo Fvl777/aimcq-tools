@@ -3817,6 +3817,7 @@ function figSaveGitHubConfig() {
 
 function figSetGitHubStatus(msg, kind) {
     const el = document.getElementById('fig-gh-status');
+    if (typeof figUpdateHostChip === 'function') { try { figUpdateHostChip(); } catch (e) {} }
     if (!el) return;
     el.textContent = msg || '';
     el.className = 'text-xs ' + (
@@ -6362,7 +6363,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v1.3.7 (jsDelivr force-purge on GitHub update — changes live instantly) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v1.3.9 (hosting dropdown + tab intro cards removed) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -6983,3 +6984,41 @@ function editorPurgeCdn(btn) {
 function figPurgeCdn(btn) {
     ghPurgeCdnWithUi((typeof figState !== 'undefined' && figState.githubFile) ? figState.githubFile : null, btn, 'Figures JSON');
 }
+
+// ============================================================
+// ===== IMAGE HOSTING SETTINGS DROPDOWN (Figure Updater) =====
+// ============================================================
+// Collapsible card + status chip for the GitHub+jsDelivr image
+// hosting config — same pattern as the AI (Gemini) settings card.
+
+function figToggleHosting() {
+    const body = document.getElementById('fig-host-body');
+    const chev = document.getElementById('fig-host-chevron');
+    if (!body) return;
+    const nowHidden = body.classList.toggle('hidden');
+    if (chev) chev.style.transform = nowHidden ? '' : 'rotate(180deg)';
+    try { lucide.createIcons(); } catch (e) {}
+}
+
+function figHostingConfigured() {
+    const c = (typeof figState !== 'undefined' && figState.github) || {};
+    return !!(c.repo && c.token);
+}
+
+function figUpdateHostChip() {
+    const chip = document.getElementById('fig-host-status-chip');
+    if (!chip) return;
+    const ok = figHostingConfigured();
+    const c = (typeof figState !== 'undefined' && figState.github) || {};
+    chip.textContent = ok ? `Ready · ${c.repo}@${c.branch || 'main'}` : 'Not configured';
+    chip.classList.toggle('on', ok);
+    chip.classList.toggle('off', !ok);
+}
+
+(function bootFigHostChip() {
+    function init() { figUpdateHostChip(); }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+    // Config loads from localStorage during boot; re-sync shortly after.
+    setTimeout(function () { try { figUpdateHostChip(); } catch (e) {} }, 800);
+})();
