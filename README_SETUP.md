@@ -60,7 +60,7 @@ Replace `USER`, `REPO`, and `v1.0` with your own. You only ever hard-code this
 
 ```html
 <div class="mcqs-page-wrap">
-  <div id="mcqs-host" data-height="100vh"></div>
+  <div id="mcqs-host" data-height="auto"></div>
 </div>
 <script src="https://cdn.jsdelivr.net/gh/USER/REPO@v1.0/mcqs-tool.js"></script>
 ```
@@ -91,11 +91,17 @@ Tool appears inside the host div ✅
 
 ### The host `<div>`
 - `id="mcqs-host"` is the default the loader looks for.
-- `[data-mcqs-tool]` also works (`<div data-mcqs-tool data-height="100vh"></div>`).
+- `[data-mcqs-tool]` also works (`<div data-mcqs-tool data-height="auto"></div>`).
 - `id="smartboard-host"` also works, so you can reuse an existing Smartboard
   page layout without renaming anything.
-- `data-height` is applied as a **min-height** (`"100vh"`, `"640"`, `"640px"`).
-  The tool itself scrolls naturally, so height is not critical.
+- `data-height` — height behavior of the host:
+  - `"auto"`, omitted, or the legacy `"100vh"` → **flexible height** (default).
+    The tool is exactly as tall as its content, so homepage content placed
+    below it flows immediately after the tool with no white gap. (`"100vh"`
+    is intentionally treated as auto for backward compatibility — older
+    embeds stop forcing a full-viewport min-height without any edit.)
+  - Any other value (`"640"`, `"640px"`, `"80vh"`) → applied as a
+    **min-height** for pages that want a fixed reserved space.
 
 ### Manual mount (optional)
 The loader auto-mounts on page load. To control it yourself:
