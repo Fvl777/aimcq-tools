@@ -73,8 +73,13 @@ localStorage and requests go directly to `generativelanguage.googleapis.com`.
 3. If it's wrong, tell you the truly correct option (with confidence level).
 4. Draft a **new explanation that replicates the pre-existing explanation's
    exact HTML format** (same tags, structure, styles, LaTeX conventions) —
-   only the substance changes to justify the correct option. Bilingual files
-   get a matching Hindi explanation in the Hindi sample's format.
+   only the substance changes to justify the correct answer. Language is
+   preserved per side: the English explanation is written in English matching
+   the English sample's format, the Hindi explanation in Hindi matching the
+   Hindi sample's format. Explanations contain **no option references** — no
+   option letters (A/B/C/D), no "Correct Answer: (X)" lines — they state and
+   justify the actual answer substance directly. (Option letters still appear
+   in the on-screen AI reasoning/verdict, just never inside the explanation.)
 5. Optionally verify **your own suggested option**: pick "Option (X) — I think
    this is correct" in the dropdown before analyzing, and the AI reports an
    explicit verdict on your suggestion.
