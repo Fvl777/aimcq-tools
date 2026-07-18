@@ -6343,7 +6343,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v1.3.5 (AI explanation: per-language format, no option references) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v1.3.6 (AI explanation follows file language — Hindi-only files fixed) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -6613,6 +6613,9 @@ function qeAiCollect() {
         options: [],
         marked: 0,
         bilingual: editorIsBilingual(),
+        // The primary panel holds the file's sole language for single-language
+        // files (which may be Hindi!) and English for bilingual files.
+        primaryLang: editorIsBilingual() ? 'en' : ((typeof _editorLangs !== 'undefined' && _editorLangs[0]) || 'en'),
         hi: null
     };
     document.querySelectorAll('#qe-en-options .opt-editor-wrap').forEach(w => {
@@ -6637,10 +6640,17 @@ function qeAiCollect() {
 // ---------- prompt ----------
 function qeAiBuildPrompt(q, suggestIdx) {
     const L = i => OPTION_LETTERS[i] || String(i + 1);
+    // Human-readable name of the primary content language. For a bilingual
+    // file the primary side is English; for a single-language file it is the
+    // file's sole language (e.g. HINDI for a Hindi-only paper).
+    const P_NAMES = { en: 'ENGLISH', hi: 'HINDI' };
+    const pName = P_NAMES[q.primaryLang] || String(q.primaryLang || 'en').toUpperCase();
     const lines = [];
 
     lines.push('You are an expert exam-question reviewer and subject-matter solver.');
     lines.push('Your job: independently solve the multiple-choice question below, then cross-check whether the currently marked correct option is REALLY correct. Be careful and rigorous — do not assume the marked answer is right.');
+    lines.push('');
+    lines.push(`THE QUESTION'S CONTENT LANGUAGE IS ${pName}. All generated explanation content must be in the question's own language — never translate it to another language.`);
     lines.push('');
     lines.push('QUESTION (plain text; may contain LaTeX between $...$ / \\(...\\) and [FIGURE: ...] placeholders):');
     lines.push(aiHtmlToPlain(q.question) || '(empty)');
@@ -6663,10 +6673,10 @@ function qeAiBuildPrompt(q, suggestIdx) {
         lines.push(q.explanation);
         lines.push('-----END EXPLANATION HTML-----');
         lines.push('');
-        lines.push('FORMAT RULE (critical): your new English explanation MUST be written in ENGLISH and MUST replicate this pre-existing explanation\'s HTML format EXACTLY — same tags, same inline styles/classes, same structure and section order, bullet lists, tables, LaTeX delimiters, emphasis conventions, and approximate length. Change ONLY the substantive content so that it correctly justifies the truly correct answer.');
-        lines.push('NO OPTION REFERENCES (critical): the explanation must NOT mention option letters or labels (A/B/C/D), the word "option", or phrases like "Correct Answer: (X)" / "Option B is right" / "the other options are wrong". Explain the answer\'s substance directly — state the actual answer content itself and justify it conceptually. If the pre-existing explanation contains any option references or per-option elimination parts, replace them with the equivalent substance-based statements (naming the actual answer text/value instead of its letter) while keeping every other aspect of the formatting identical. Do not add new sections that the sample does not have, and do not drop sections it does have.');
+        lines.push(`FORMAT RULE (critical): your new explanation ("explanation_html") MUST be written entirely in ${pName} — the SAME language as the question and the pre-existing explanation above — and MUST replicate this pre-existing explanation's HTML format EXACTLY — same tags, same inline styles/classes, same structure and section order, bullet lists, tables, LaTeX delimiters, emphasis conventions, and approximate length. Change ONLY the substantive content so that it correctly justifies the truly correct answer.`);
+        lines.push('NO OPTION REFERENCES (critical): the explanation must NOT mention option letters or labels (A/B/C/D), the word "option" / "विकल्प", or phrases like "Correct Answer: (X)" / "सही उत्तर: (X)" / "Option B is right" / "the other options are wrong". Explain the answer\'s substance directly — state the actual answer content itself and justify it conceptually. If the pre-existing explanation contains any option references or per-option elimination parts, replace them with the equivalent substance-based statements (naming the actual answer text/value instead of its letter) while keeping every other aspect of the formatting identical. Do not add new sections that the sample does not have, and do not drop sections it does have.');
     } else {
-        lines.push('PRE-EXISTING EXPLANATION: (none). Use this simple clean HTML format for the new explanation, written in English: <p><b>concise statement of the correct answer\'s substance (the actual fact/value/concept — NOT its option letter)</b></p><p>step-by-step conceptual justification</p>. Do NOT reference option letters (A/B/C/D), the word "option", or phrases like "Correct Answer: (X)" anywhere in the explanation.');
+        lines.push(`PRE-EXISTING EXPLANATION: (none). Use this simple clean HTML format for the new explanation, written entirely in ${pName} (the question's own language): <p><b>concise statement of the correct answer's substance (the actual fact/value/concept — NOT its option letter)</b></p><p>step-by-step conceptual justification</p>. Do NOT reference option letters (A/B/C/D), the word "option" / "विकल्प", or phrases like "Correct Answer: (X)" / "सही उत्तर: (X)" anywhere in the explanation.`);
     }
 
     if (q.bilingual && q.hi) {
@@ -6689,17 +6699,19 @@ function qeAiBuildPrompt(q, suggestIdx) {
     lines.push('1. Solve the question yourself from first principles BEFORE looking at the marked answer.');
     lines.push('2. Decide the truly correct option (0-based index). If a [FIGURE] is essential and missing, reason from the text as best you can and lower your confidence.');
     lines.push('3. Compare your answer with the currently marked option.');
-    lines.push('4. Write the new explanation(s) per the FORMAT RULE and NO OPTION REFERENCES rules above — English explanation in English, Hindi explanation in Hindi, each matching its own pre-existing sample\'s format, and neither mentioning option letters/labels. (Option letters MAY still appear in "reasoning" and "user_suggestion_verdict" — the restriction applies only to the explanation HTML fields.)');
+    lines.push(q.bilingual
+        ? '4. Write the new explanation(s) per the FORMAT RULE and NO OPTION REFERENCES rules above — English explanation in English, Hindi explanation in Hindi, each matching its own pre-existing sample\'s format, and neither mentioning option letters/labels. (Option letters MAY still appear in "reasoning" and "user_suggestion_verdict" — the restriction applies only to the explanation HTML fields.)'
+        : `4. Write the new explanation per the FORMAT RULE and NO OPTION REFERENCES rules above — entirely in ${pName}, matching the pre-existing sample's format, with no option letters/labels mentioned. (Option letters MAY still appear in "reasoning" and "user_suggestion_verdict" — the restriction applies only to the explanation HTML field.)`);
     lines.push('');
     lines.push('Respond with ONLY a single JSON object (no markdown fences, no commentary):');
     lines.push('{');
     lines.push('  "correct_index": <0-based integer>,');
     lines.push('  "is_marked_correct": <true|false>,');
     lines.push('  "confidence": "high" | "medium" | "low",');
-    lines.push('  "reasoning": "<2-5 sentence plain-text summary of how you solved it and, if the marked answer is wrong, why>",');
+    lines.push(`  "reasoning": "<2-5 sentence plain-text summary, written in ${q.bilingual ? 'ENGLISH' : pName}, of how you solved it and, if the marked answer is wrong, why>",`);
     if (suggestIdx !== null && suggestIdx !== undefined)
         lines.push('  "user_suggestion_verdict": "<verdict on the user\'s suggested option>",');
-    lines.push('  "explanation_html": "<new English explanation as an HTML string>"' + (q.bilingual ? ',' : ''));
+    lines.push(`  "explanation_html": "<new explanation in ${pName} as an HTML string>"` + (q.bilingual ? ',' : ''));
     if (q.bilingual)
         lines.push('  "explanation_html_hi": "<new Hindi explanation as an HTML string>"');
     lines.push('}');
