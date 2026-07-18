@@ -6343,7 +6343,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v1.3.4 (flex height + AI Question Update via Gemini) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v1.3.5 (AI explanation: per-language format, no option references) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -6663,9 +6663,10 @@ function qeAiBuildPrompt(q, suggestIdx) {
         lines.push(q.explanation);
         lines.push('-----END EXPLANATION HTML-----');
         lines.push('');
-        lines.push('FORMAT RULE (critical): your new English explanation MUST replicate this pre-existing explanation\'s HTML format EXACTLY — same tags, same inline styles/classes, same structure and section order (e.g. a bolded "Correct Answer" line, bullet lists, per-option elimination, tables, LaTeX delimiters, emphasis conventions, approximate length). Change ONLY the substantive content so that it correctly justifies the truly correct option (and, if the format includes it, why the other options are wrong). Do not add new sections that the sample does not have, and do not drop sections it does have.');
+        lines.push('FORMAT RULE (critical): your new English explanation MUST be written in ENGLISH and MUST replicate this pre-existing explanation\'s HTML format EXACTLY — same tags, same inline styles/classes, same structure and section order, bullet lists, tables, LaTeX delimiters, emphasis conventions, and approximate length. Change ONLY the substantive content so that it correctly justifies the truly correct answer.');
+        lines.push('NO OPTION REFERENCES (critical): the explanation must NOT mention option letters or labels (A/B/C/D), the word "option", or phrases like "Correct Answer: (X)" / "Option B is right" / "the other options are wrong". Explain the answer\'s substance directly — state the actual answer content itself and justify it conceptually. If the pre-existing explanation contains any option references or per-option elimination parts, replace them with the equivalent substance-based statements (naming the actual answer text/value instead of its letter) while keeping every other aspect of the formatting identical. Do not add new sections that the sample does not have, and do not drop sections it does have.');
     } else {
-        lines.push('PRE-EXISTING EXPLANATION: (none). Use this simple clean HTML format for the new explanation: <p><b>Correct Answer: (X)</b></p><p>step-by-step justification</p><p>brief note on why the other options are wrong</p>');
+        lines.push('PRE-EXISTING EXPLANATION: (none). Use this simple clean HTML format for the new explanation, written in English: <p><b>concise statement of the correct answer\'s substance (the actual fact/value/concept — NOT its option letter)</b></p><p>step-by-step conceptual justification</p>. Do NOT reference option letters (A/B/C/D), the word "option", or phrases like "Correct Answer: (X)" anywhere in the explanation.');
     }
 
     if (q.bilingual && q.hi) {
@@ -6674,12 +6675,12 @@ function qeAiBuildPrompt(q, suggestIdx) {
         lines.push('QUESTION (HINDI): ' + (aiHtmlToPlain(q.hi.question) || '(empty)'));
         q.hi.options.forEach((o, i) => lines.push(`(${L(i)}) [HI] ${aiHtmlToPlain(o) || '(empty)'}`));
         if ((q.hi.explanation || '').trim()) {
-            lines.push('PRE-EXISTING HINDI EXPLANATION (raw HTML — replicate ITS exact format for "explanation_html_hi"):');
+            lines.push('PRE-EXISTING HINDI EXPLANATION (raw HTML). "explanation_html_hi" MUST be written entirely in HINDI and MUST replicate THIS Hindi sample\'s exact HTML format (its tags, structure, styles, conventions — not the English sample\'s). The same NO OPTION REFERENCES rule applies: no option letters (A/B/C/D), no \u0935\u093f\u0915\u0932\u094d\u092a/"option" mentions, no "\u0938\u0939\u0940 \u0909\u0924\u094d\u0924\u0930: (X)"-style lines — state and justify the actual answer substance in Hindi instead:');
             lines.push('-----BEGIN HINDI EXPLANATION HTML-----');
             lines.push(q.hi.explanation);
             lines.push('-----END HINDI EXPLANATION HTML-----');
         } else {
-            lines.push('PRE-EXISTING HINDI EXPLANATION: (none). Produce "explanation_html_hi" in Hindi using the same HTML structure as your English explanation.');
+            lines.push('PRE-EXISTING HINDI EXPLANATION: (none). Produce "explanation_html_hi" written entirely in Hindi, using the same HTML structure as your English explanation, with the same NO OPTION REFERENCES rule (no option letters, no विकल्प/"option" mentions).');
         }
     }
 
@@ -6688,7 +6689,7 @@ function qeAiBuildPrompt(q, suggestIdx) {
     lines.push('1. Solve the question yourself from first principles BEFORE looking at the marked answer.');
     lines.push('2. Decide the truly correct option (0-based index). If a [FIGURE] is essential and missing, reason from the text as best you can and lower your confidence.');
     lines.push('3. Compare your answer with the currently marked option.');
-    lines.push('4. Write the new explanation(s) per the FORMAT RULE above, justifying YOUR correct option.');
+    lines.push('4. Write the new explanation(s) per the FORMAT RULE and NO OPTION REFERENCES rules above — English explanation in English, Hindi explanation in Hindi, each matching its own pre-existing sample\'s format, and neither mentioning option letters/labels. (Option letters MAY still appear in "reasoning" and "user_suggestion_verdict" — the restriction applies only to the explanation HTML fields.)');
     lines.push('');
     lines.push('Respond with ONLY a single JSON object (no markdown fences, no commentary):');
     lines.push('{');
