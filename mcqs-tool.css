@@ -1137,3 +1137,35 @@
 .mcqs-tool-root, .mcqs-tool-root * { box-sizing: border-box; }
 .mcqs-tool-root { width: 100%; }
 #mcqs-host, [data-mcqs-tool] { display: block; width: 100%; }
+
+/* ===== AI Question Update (Gemini) ===== */
+.ai-status-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .02em;
+    padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+}
+.ai-status-chip::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
+.ai-status-chip.off { background: #f3f4f6; color: #9ca3af; border: 1px solid #e5e7eb; }
+.ai-status-chip.off::before { background: #d1d5db; }
+.ai-status-chip.on  { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+.ai-status-chip.on::before  { background: #10b981; }
+
+@keyframes qe-ai-spin { to { transform: rotate(360deg); } }
+.qe-ai-spinner {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.4); border-top-color: #fff;
+    display: inline-block; animation: qe-ai-spin .7s linear infinite;
+}
+
+.qe-ai-expl-preview { max-height: 260px; overflow-y: auto; line-height: 1.55; }
+.qe-ai-expl-preview img { max-width: 100%; height: auto; }
+.qe-ai-expl-preview table { border-collapse: collapse; }
+.qe-ai-expl-preview td, .qe-ai-expl-preview th { border: 1px solid #e5e7eb; padding: 3px 7px; }
+
+#qe-ai-verdict.ok   { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
+#qe-ai-verdict.bad  { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+#qe-ai-verdict .qe-ai-verdict-chip {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 26px; height: 26px; padding: 0 8px; border-radius: 8px;
+    font-weight: 800; font-size: 13px; color: #fff; flex-shrink: 0;
+}
