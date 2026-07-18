@@ -290,6 +290,9 @@
                     <button class="gd-btn gd-btn-outline" onclick="editorCopyGitHubCdn()" title="Copy the jsDelivr CDN link for this JSON">
                         <i data-lucide="link" class="w-3.5 h-3.5"></i> Copy CDN link
                     </button>
+                    <button class="gd-btn gd-btn-outline" onclick="editorPurgeCdn(this)" title="Force jsDelivr to serve the latest committed version of this JSON immediately">
+                        <i data-lucide="refresh-ccw" class="w-3.5 h-3.5"></i> Purge CDN cache
+                    </button>
                     <button class="gd-btn gd-btn-danger" onclick="editorUnlinkGitHub()" title="Unlink — saves will no longer commit to this GitHub file">
                         <i data-lucide="unlink" class="w-3.5 h-3.5"></i> Unlink
                     </button>
@@ -532,6 +535,9 @@
                     </span>
                     <button class="gd-btn gd-btn-outline" onclick="figCopyGitHubCdn()" title="Copy the jsDelivr CDN link for this JSON">
                         <i data-lucide="link" class="w-3.5 h-3.5"></i> Copy CDN link
+                    </button>
+                    <button class="gd-btn gd-btn-outline" onclick="figPurgeCdn(this)" title="Force jsDelivr to serve the latest committed version of this JSON immediately">
+                        <i data-lucide="refresh-ccw" class="w-3.5 h-3.5"></i> Purge CDN cache
                     </button>
                     <button class="gd-btn gd-btn-danger" onclick="figUnlinkGitHub()" title="Unlink — saves will no longer commit to this GitHub file">
                         <i data-lucide="unlink" class="w-3.5 h-3.5"></i> Unlink
