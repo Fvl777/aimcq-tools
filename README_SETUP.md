@@ -54,6 +54,42 @@ Replace `USER`, `REPO`, and `v1.0` with your own. You only ever hard-code this
 
 ---
 
+## AI Question Update (Gemini API)
+
+The **Question Editor** tab includes an AI review workflow powered by Google's
+Gemini API. It runs entirely in the browser — your key is stored only in
+localStorage and requests go directly to `generativelanguage.googleapis.com`.
+
+**Setup (once):** load a JSON in the Question Editor tab, open the
+**"AI Question Update (Gemini API)"** card above the toolbar, paste your key
+(free at https://aistudio.google.com/app/apikey), pick a model
+(`gemini-2.5-flash` recommended), then **Save**. Use **Test connection** to verify.
+
+**Per question:** click any question to open its edit modal. The
+**AI Analysis (Gemini)** panel there will:
+
+1. Independently re-solve the question from the question text + options.
+2. Cross-check whether the currently marked correct option is really correct.
+3. If it's wrong, tell you the truly correct option (with confidence level).
+4. Draft a **new explanation that replicates the pre-existing explanation's
+   exact HTML format** (same tags, structure, styles, LaTeX conventions) —
+   only the substance changes to justify the correct option. Bilingual files
+   get a matching Hindi explanation in the Hindi sample's format.
+5. Optionally verify **your own suggested option**: pick "Option (X) — I think
+   this is correct" in the dropdown before analyzing, and the AI reports an
+   explicit verdict on your suggestion.
+
+Nothing is changed automatically. Review the result, then use
+**Apply Correct Option / Apply Explanation / Apply Both**, and finally click
+**Save Changes** to commit (and Apply & Export / Update to GitHub as usual).
+
+Notes: questions relying on figures are analyzed from text only ("[FIGURE]"
+placeholder is sent), so treat low-confidence verdicts on figure questions
+with care. If requests fail, check the key, model access, quota, or
+ad-blockers blocking `googleapis.com`.
+
+---
+
 ## Step 3 — Embed it
 
 ### Any website
