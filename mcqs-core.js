@@ -3045,6 +3045,7 @@ function figSelectQuestion(idx) {
         h: qImg.h || FIG_IMG_DEFAULT_H,
         ar: (qImg.w && qImg.h) ? (qImg.w / qImg.h) : (FIG_IMG_DEFAULT_W / FIG_IMG_DEFAULT_H),
         lock: true,
+        pos: 'auto',   // where the figure sits in the question text
     };
     ['a','b','c','d'].forEach(k => {
         const oi = FIG_OPT_INDEX[k];
@@ -4017,7 +4018,8 @@ function figRenderPreview() {
     const qSlot = figState.slots.q;
     const qSrc = figGetSlotImageSrc(qSlot);
     qText = figApplyImageToText(qText, qSrc
-        ? figBuildImgTag(qSrc, qSlot.w, qSlot.h) : '', !!qSrc);
+        ? figBuildImgTag(qSrc, qSlot.w, qSlot.h) : '', !!qSrc,
+        qSlot ? qSlot.pos : undefined);
 
     const correct = Array.isArray(meta._aimcq_correct_answers)
         ? meta._aimcq_correct_answers.map(Number) : [0];
@@ -4085,23 +4087,87 @@ function figRenderPreview() {
 
 // Replace a placeholder OR an existing aimcq image in a text body with
 // the supplied img tag. If `hasImg` is false, strips placeholders only.
-function figApplyImageToText(text, imgTag, hasImg) {
+// `pos` chooses WHERE the figure goes:
+//   'auto' (default) — replace [image here] placeholder, else replace the
+//                      existing aimcq figure, else append at the end.
+//   'start' | 'end'  — force the figure to the start / end of the text.
+//   <number N>       — insert after the question's Nth line/segment
+//                      (0-based; segments as computed by figSplitQSegments).
+function figApplyImageToText(text, imgTag, hasImg, pos) {
     if (!text) return hasImg ? imgTag : text;
     let out = text;
-    const imgRe = new RegExp('<img[^>]*class=["\\\']?[^"\\\']*' + FIG_IMG_CLASS + '[^>]*>', 'i');
     if (!hasImg || !imgTag) {
         // Just strip placeholders
         return out.replace(FIG_PLACEHOLDER_RE_G, '').trim();
     }
-    if (FIG_PLACEHOLDER_RE.test(out)) {
-        out = out.replace(FIG_PLACEHOLDER_RE, imgTag);
-    } else if (imgRe.test(out)) {
-        out = out.replace(imgRe, imgTag);
-    } else {
-        out = out + (out.trim().endsWith('>') ? '' : '<br>') + imgTag;
+    if (pos === undefined || pos === null || pos === 'auto') {
+        const imgRe = new RegExp('<img[^>]*class=["\\\']?[^"\\\']*' + FIG_IMG_CLASS + '[^>]*>', 'i');
+        if (FIG_PLACEHOLDER_RE.test(out)) {
+            out = out.replace(FIG_PLACEHOLDER_RE, imgTag);
+        } else if (imgRe.test(out)) {
+            out = out.replace(imgRe, imgTag);
+        } else {
+            out = out + (out.trim().endsWith('>') ? '' : '<br>') + imgTag;
+        }
+        // Clean any leftover placeholders
+        return out.replace(FIG_PLACEHOLDER_RE_G, '').trim();
     }
-    // Clean any leftover placeholders
-    return out.replace(FIG_PLACEHOLDER_RE_G, '').trim();
+    // Explicit position: work on the CLEANED text (placeholders and any
+    // previously-inserted aimcq figure removed) so re-applying at a new
+    // position moves the figure instead of duplicating it.
+    const clean = figCleanQText(out);
+    if (pos === 'start') {
+        return (imgTag + clean).trim();
+    }
+    if (pos === 'end') {
+        return (clean + (clean.trim().endsWith('>') ? '' : '<br>') + imgTag).trim();
+    }
+    // Numeric: insert after segment N.
+    const segs = figSplitQSegments(clean);
+    if (!segs.length) return imgTag;
+    const n = Math.max(0, Math.min(parseInt(pos, 10) || 0, segs.length - 1));
+    return (segs.slice(0, n + 1).join('') + imgTag + segs.slice(n + 1).join('')).trim();
+}
+
+// Remove [image here: ...] placeholders and any existing aimcq figure
+// <img> from a question text — the neutral base for positional insertion.
+function figCleanQText(text) {
+    const imgReG = new RegExp('<img[^>]*class=["\\\']?[^"\\\']*' + FIG_IMG_CLASS + '[^>]*>', 'ig');
+    return String(text || '')
+        .replace(imgReG, '')
+        .replace(FIG_PLACEHOLDER_RE_G, '')
+        .trim();
+}
+
+// Split question HTML into insertable line/segments at block boundaries
+// (</p>, </div>, </li>, </tr>, <br>), keeping each delimiter attached to
+// the segment it ends. Markup-only fragments (e.g. bare <br><br>) are
+// glued to the neighbouring segment so every listed segment has visible
+// text — these are the "lines" offered in the position picker.
+function figSplitQSegments(html) {
+    const parts = String(html || '').split(/(<\/p>|<\/div>|<\/li>|<\/tr>|<br\s*\/?>)/i);
+    const segs = [];
+    let carry = '';
+    for (let i = 0; i < parts.length; i += 2) {
+        const chunk = parts[i] || '';
+        const delim = parts[i + 1] || '';
+        const raw = carry + chunk + delim;
+        carry = '';
+        if (!raw) continue;
+        if (stripHtmlTags(chunk).trim() === '') {
+            // No visible text in this fragment — attach it to the previous
+            // segment (trailing <br>s) or carry it into the next (leading markup).
+            if (segs.length) segs[segs.length - 1] += raw;
+            else carry = raw;
+        } else {
+            segs.push(raw);
+        }
+    }
+    if (carry) {
+        if (segs.length) segs[segs.length - 1] += carry;
+        else if (carry.trim()) segs.push(carry);
+    }
+    return segs;
 }
 
 // ==================== APPLY FIGURES TO QUESTION ====================
@@ -4177,13 +4243,13 @@ async function figApplyToQuestion() {
     const qSlot = figState.slots.q;
     if (qSlot && qSlot.url) {
         const imgTag = figBuildImgTag(qSlot.url, qSlot.w, qSlot.h);
-        post.post_content = figApplyImageToText(post.post_content || '', imgTag, true);
+        post.post_content = figApplyImageToText(post.post_content || '', imgTag, true, qSlot.pos);
         post.post_title = stripHtmlTags(post.post_content).slice(0, 120) || post.post_title;
 
-        // Hindi content mirror
+        // Hindi content mirror (same line position, clamped to its own lines)
         if (meta._aimcq_question_content_hi) {
             meta._aimcq_question_content_hi =
-                figApplyImageToText(meta._aimcq_question_content_hi, imgTag, true);
+                figApplyImageToText(meta._aimcq_question_content_hi, imgTag, true, qSlot.pos);
         }
         // Record dimensions in the meta the theme reads.
         meta._aimcq_image_width = String(qSlot.w || FIG_IMG_DEFAULT_W);
@@ -6363,7 +6429,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v1.3.9 (hosting dropdown + tab intro cards removed) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v1.4.0 (figure position picker — place figures anywhere in the question) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -7021,4 +7087,69 @@ function figUpdateHostChip() {
     else init();
     // Config loads from localStorage during boot; re-sync shortly after.
     setTimeout(function () { try { figUpdateHostChip(); } catch (e) {} }, 800);
+})();
+
+// ============================================================
+// ========= QUESTION FIGURE POSITION PICKER ==================
+// ============================================================
+// Lets the user place the question figure ANYWHERE between the
+// question's lines (like exam papers where the diagram sits
+// mid-question) instead of always at the end. Shown whenever the
+// question slot holds an image; the live preview follows instantly.
+
+function figRenderQPosPicker() {
+    const panel = document.getElementById('fig-qpos-panel');
+    const box = document.getElementById('fig-qpos-options');
+    if (!panel || !box) return;
+
+    const qSlot = figState.slots && figState.slots.q;
+    const show = !!(qSlot && figSlotHasImage(qSlot) && figState.selectedIdx !== null && figState.data);
+    panel.classList.toggle('hidden', !show);
+    if (!show) { box.innerHTML = ''; return; }
+
+    if (qSlot.pos === undefined) qSlot.pos = 'auto';
+
+    const post = figState.data.posts[figState.selectedIdx];
+    const clean = figCleanQText(post.post_content || post.post_title || '');
+    const segs = figSplitQSegments(clean);
+    const cur = String(qSlot.pos);
+
+    const item = (val, label, sub) => {
+        const active = cur === String(val);
+        return `<label class="fig-qpos-item ${active ? 'active' : ''}">
+            <input type="radio" name="fig-qpos" value="${val}" ${active ? 'checked' : ''}>
+            <span class="fig-qpos-lbl">${label}</span>
+            ${sub ? `<span class="fig-qpos-seg">${sub}</span>` : ''}
+        </label>`;
+    };
+
+    let html = item('auto', 'Auto', 'replace [image here] placeholder / existing figure — else at the end');
+    html += item('start', 'At the very start', '');
+    segs.forEach((s, i) => {
+        const t = stripHtmlTags(s).replace(/\s+/g, ' ').trim();
+        html += item(i, `After line ${i + 1}`, escapeAttr(t.slice(0, 80)) + (t.length > 80 ? '…' : ''));
+    });
+    html += item('end', 'At the very end', '');
+    box.innerHTML = html;
+
+    box.querySelectorAll('input[name="fig-qpos"]').forEach(r => {
+        r.addEventListener('change', () => {
+            const v = r.value;
+            qSlot.pos = (v === 'auto' || v === 'start' || v === 'end') ? v : parseInt(v, 10);
+            box.querySelectorAll('.fig-qpos-item').forEach(l =>
+                l.classList.toggle('active', l.querySelector('input').checked));
+            figRenderPreview();
+        });
+    });
+}
+
+// Re-render the picker whenever the slots re-render (question selected,
+// figure cropped/cleared/applied) — wrap the existing renderer.
+(function hookQPosIntoSlots() {
+    if (typeof figRenderSlots !== 'function') return;
+    const orig = figRenderSlots;
+    figRenderSlots = function () {
+        orig.apply(this, arguments);
+        try { figRenderQPosPicker(); } catch (e) {}
+    };
 })();
