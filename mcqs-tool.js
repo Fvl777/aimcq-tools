@@ -315,6 +315,65 @@
                     </div>
                 </div>
 
+                <!-- ===== AI Question Update — Gemini API settings ===== -->
+                <div id="ai-settings-card" class="bg-white border border-violet-200 rounded-xl overflow-hidden shadow-sm">
+                    <button type="button" onclick="aiToggleSettings()" class="w-full flex items-center gap-3 px-4 py-3 hover:bg-violet-50/60 transition-colors text-left">
+                        <span class="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center flex-shrink-0">
+                            <i data-lucide="sparkles" class="w-4 h-4 text-violet-600"></i>
+                        </span>
+                        <span class="flex-1 min-w-0">
+                            <span class="block text-sm font-bold text-gray-800">AI Question Update <span class="text-violet-500 font-semibold">(Gemini API)</span></span>
+                            <span class="block text-xs text-gray-400">Cross-check answers &amp; regenerate explanations inside each question's edit modal.</span>
+                        </span>
+                        <span id="ai-settings-status" class="ai-status-chip off flex-shrink-0">Not configured</span>
+                        <i data-lucide="chevron-down" id="ai-settings-chevron" class="w-4 h-4 text-gray-400 flex-shrink-0 transition-transform"></i>
+                    </button>
+                    <div id="ai-settings-body" class="hidden border-t border-violet-100 px-4 py-4 space-y-3 bg-violet-50/40">
+                        <div class="grid sm:grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Gemini API Key</label>
+                                <div class="relative">
+                                    <input type="password" id="ai-api-key" placeholder="AIza..." autocomplete="off"
+                                           class="w-full text-sm border border-gray-200 rounded-lg pl-3 pr-9 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
+                                    <button type="button" onclick="aiToggleKeyVisibility()" title="Show / hide key"
+                                            class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                        <i data-lucide="eye" id="ai-key-eye" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Model</label>
+                                <select id="ai-model" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
+                                    <option value="gemini-2.5-flash">gemini-2.5-flash (fast, recommended)</option>
+                                    <option value="gemini-2.5-pro">gemini-2.5-pro (deepest reasoning)</option>
+                                    <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                                    <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                                    <option value="custom">Custom model id…</option>
+                                </select>
+                                <input type="text" id="ai-model-custom" placeholder="e.g. gemini-exp-1206"
+                                       class="hidden mt-2 w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <button type="button" onclick="aiSaveSettings()" class="text-xs bg-violet-600 hover:bg-violet-700 text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center gap-1.5">
+                                <i data-lucide="save" class="w-3.5 h-3.5"></i> Save
+                            </button>
+                            <button type="button" id="ai-btn-test" onclick="aiTestConnection()" class="text-xs bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-semibold py-2 px-4 rounded-lg transition-colors flex items-center gap-1.5">
+                                <i data-lucide="plug-zap" class="w-3.5 h-3.5"></i> Test connection
+                            </button>
+                            <button type="button" onclick="aiClearSettings()" class="text-xs bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-semibold py-2 px-4 rounded-lg transition-colors flex items-center gap-1.5">
+                                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Clear
+                            </button>
+                            <span id="ai-test-result" class="text-xs font-semibold"></span>
+                        </div>
+                        <p class="text-[11px] text-gray-400 leading-relaxed">
+                            The key is stored only in <b>this browser</b> (localStorage) and is sent directly to
+                            Google's Gemini API — never to any other server. Get a free key at
+                            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener" class="text-violet-600 underline">aistudio.google.com</a>.
+                        </p>
+                    </div>
+                </div>
+
                 <!-- Toolbar / Actions -->
                 <div class="sticky-editor-toolbar rounded-xl px-4 py-3 flex flex-wrap gap-2 items-center">
                     <!-- Search -->
@@ -1001,6 +1060,70 @@
                 <div class="mt-4">
                     <p class="q-editor-section-label">व्याख्या (हिन्दी)</p>
                     <div class="rich-editor-wrap" data-field="hi-explanation" data-lang="hi"></div>
+                </div>
+            </div>
+
+            <!-- ===== AI ANALYSIS (Gemini) — visible in both language tabs ===== -->
+            <div id="qe-ai-section" class="border border-violet-200 rounded-2xl bg-gradient-to-br from-violet-50/70 to-indigo-50/50 p-4">
+                <div class="flex items-center justify-between gap-2 flex-wrap mb-3">
+                    <p class="text-sm font-bold text-gray-800 flex items-center gap-2">
+                        <i data-lucide="sparkles" class="w-4 h-4 text-violet-600"></i>
+                        AI Analysis <span class="text-violet-500 text-xs font-semibold">(Gemini)</span>
+                    </p>
+                    <span id="qe-ai-status" class="ai-status-chip off">Not configured</span>
+                </div>
+
+                <div class="flex items-end gap-2 flex-wrap">
+                    <div class="flex-1 min-w-[180px]">
+                        <label class="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                            Your suggested correct option <span class="normal-case font-medium text-gray-400">(optional — AI will verify it)</span>
+                        </label>
+                        <select id="qe-ai-suggest" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-violet-400">
+                            <option value="">None — let AI decide independently</option>
+                        </select>
+                    </div>
+                    <button type="button" id="qe-ai-analyze-btn" onclick="qeAiAnalyze()"
+                            class="bg-violet-600 hover:bg-violet-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-bold py-2 px-4 rounded-lg transition-colors flex items-center gap-2 shadow-sm flex-shrink-0">
+                        <i data-lucide="scan-search" class="w-4 h-4"></i>
+                        <span id="qe-ai-analyze-label">Analyze Question</span>
+                    </button>
+                </div>
+                <p class="text-[11px] text-gray-400 mt-2">
+                    AI re-solves the question, cross-checks the marked answer, and drafts a new explanation
+                    <b>in the exact format of the existing explanation</b>. Nothing is changed until you click Apply.
+                </p>
+
+                <!-- Error -->
+                <div id="qe-ai-error" class="hidden mt-3 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
+
+                <!-- Result -->
+                <div id="qe-ai-result" class="hidden mt-3 space-y-3">
+                    <div id="qe-ai-verdict" class="rounded-xl px-4 py-3 text-sm font-semibold flex items-start gap-2.5"></div>
+                    <div id="qe-ai-suggest-verdict" class="hidden rounded-xl px-4 py-3 text-xs bg-sky-50 border border-sky-200 text-sky-800"></div>
+                    <div>
+                        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">AI Reasoning</p>
+                        <p id="qe-ai-reasoning" class="text-xs text-gray-600 leading-relaxed bg-white border border-gray-200 rounded-lg px-3 py-2.5"></p>
+                    </div>
+                    <div>
+                        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">New Explanation Preview <span class="normal-case font-medium text-gray-400">(same format as existing)</span></p>
+                        <div id="qe-ai-expl-preview" class="qe-ai-expl-preview bg-white border border-gray-200 rounded-lg px-3 py-2.5 text-sm"></div>
+                        <div id="qe-ai-expl-preview-hi-wrap" class="hidden mt-2">
+                            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">नई व्याख्या (हिन्दी)</p>
+                            <div id="qe-ai-expl-preview-hi" class="qe-ai-expl-preview bg-white border border-gray-200 rounded-lg px-3 py-2.5 text-sm" lang="hi"></div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 flex-wrap pt-1">
+                        <button type="button" onclick="qeAiApply('option')" class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-3.5 rounded-lg transition-colors flex items-center gap-1.5">
+                            <i data-lucide="check-circle" class="w-3.5 h-3.5"></i> Apply Correct Option
+                        </button>
+                        <button type="button" onclick="qeAiApply('explanation')" class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-3.5 rounded-lg transition-colors flex items-center gap-1.5">
+                            <i data-lucide="file-text" class="w-3.5 h-3.5"></i> Apply Explanation
+                        </button>
+                        <button type="button" onclick="qeAiApply('both')" class="text-xs bg-violet-600 hover:bg-violet-700 text-white font-bold py-2 px-3.5 rounded-lg transition-colors flex items-center gap-1.5">
+                            <i data-lucide="wand-2" class="w-3.5 h-3.5"></i> Apply Both
+                        </button>
+                        <span class="text-[11px] text-gray-400 ml-1">Then hit <b>Save Changes</b> below to commit.</span>
+                    </div>
                 </div>
             </div>
 
