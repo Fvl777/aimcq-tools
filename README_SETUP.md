@@ -73,8 +73,9 @@ localStorage and requests go directly to `generativelanguage.googleapis.com`.
 3. If it's wrong, tell you the truly correct option (with confidence level).
 4. Draft a **new explanation that replicates the pre-existing explanation's
    exact HTML format** (same tags, structure, styles, LaTeX conventions) —
-   only the substance changes to justify the correct answer. Language is
-   preserved per side: the English explanation is written in English matching
+   only the substance changes to justify the correct answer. Language always
+   follows the file itself — a Hindi-only file gets a Hindi explanation, an
+   English-only file an English one. For bilingual files it is preserved per side: the English explanation is written in English matching
    the English sample's format, the Hindi explanation in Hindi matching the
    Hindi sample's format. Explanations contain **no option references** — no
    option letters (A/B/C/D), no "Correct Answer: (X)" lines — they state and
