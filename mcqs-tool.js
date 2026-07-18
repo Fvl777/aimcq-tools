@@ -7,7 +7,7 @@
  *
  *  Embed on any page:
  *      <div class="mcqs-page-wrap">
- *        <div id="mcqs-host" data-height="100vh"></div>
+ *        <div id="mcqs-host" data-height="auto"></div>
  *      </div>
  *      <script src="https://cdn.jsdelivr.net/gh/USER/REPO@VERSION/mcqs-tool.js"></script>
  *
@@ -1435,13 +1435,20 @@
     if (host.getAttribute("data-mcqs-mounted")) { return; }
     host.setAttribute("data-mcqs-mounted", "1");
 
-    // Honor data-height ("100vh", "640", "640px", ...).
+    // Height handling — the tool is height-flexible by default so the page
+    // content below it flows right after the tool (no forced whitespace).
+    //   data-height absent / "auto" / "100vh"  -> flexible (legacy "100vh"
+    //   values are treated as auto on purpose: forcing a full-viewport
+    //   min-height left a white gap between the tool and the content below).
+    //   data-height "640" / "640px" / "80vh" (anything else) -> honored as
+    //   a min-height for pages that really want a fixed reserve.
     var h = host.getAttribute("data-height");
-    if (h) { host.style.minHeight = /^\d+$/.test(h) ? (h + "px") : h; }
+    var flexibleH = !h || h === "auto" || h === "100vh";
+    if (!flexibleH) { host.style.minHeight = /^\d+$/.test(h) ? (h + "px") : h; }
     host.style.width = "100%";
     if (!host.style.position) { host.style.position = "relative"; }
     host.style.background = "#f3f4f6";            // calm backdrop = no white/unstyled flash
-    if (!h) { host.style.minHeight = "240px"; }   // reserve space for the loader
+    if (flexibleH) { host.style.minHeight = "240px"; } // reserve space for the loader only
 
     // 1) Start fetching styles + libraries BEFORE the markup can paint.
     loadDeps();
@@ -1449,7 +1456,9 @@
     // 2) Build the tool markup, but keep it hidden until the CSS is applied.
     //    It still goes into the DOM so the core script can wire up against it.
     var root = document.createElement("div");
-    root.className = "mcqs-tool-root min-h-screen p-4 sm:p-8 text-gray-800";
+    // NOTE: no "min-h-screen" here — the root grows with its content, so the
+    // homepage content below the tool sits directly under it (no white gap).
+    root.className = "mcqs-tool-root p-4 sm:p-8 text-gray-800";
     root.style.visibility = "hidden";
     root.style.opacity = "0";
     root.style.transition = "opacity .18s ease";
@@ -1487,6 +1496,9 @@
           root.style.visibility = "";
           root.style.opacity = "1";
           host.style.background = "";
+          // Flexible mode: drop the loader placeholder min-height so the
+          // host now collapses/grows exactly to the tool's content height.
+          if (flexibleH) { host.style.minHeight = ""; }
           if (overlay && overlay.parentNode) {
             // let the fade run, then drop the overlay
             setTimeout(function () {
