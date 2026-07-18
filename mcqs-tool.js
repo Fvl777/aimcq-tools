@@ -143,19 +143,6 @@
         <!-- ==================== QUIZ BUILDER TAB ==================== -->
         <div id="tab-quizbuilder" class="hidden space-y-5">
 
-            <!-- Intro -->
-            <div class="bg-teal-50 border border-teal-100 rounded-xl p-4 flex items-start gap-3">
-                <i data-lucide="package-plus" class="w-5 h-5 text-teal-600 flex-shrink-0 mt-0.5"></i>
-                <div class="text-sm text-teal-900">
-                    <p class="font-semibold mb-0.5">Quiz Builder</p>
-                    <p class="text-teal-700 text-xs leading-relaxed">
-                        Build a brand-new quiz JSON by hand-picking questions from one or more
-                        source files. Drag questions from the <b>source</b> into your
-                        <b>new quiz</b>, reorder them, then download the result.
-                    </p>
-                </div>
-            </div>
-
             <!-- Step 1: Load source files -->
             <div class="space-y-3">
                 <div class="flex items-center gap-3 flex-wrap">
@@ -496,22 +483,6 @@
         <!-- ==================== FIGURE UPDATER TAB ==================== -->
         <div id="tab-figures" class="hidden space-y-5">
 
-            <!-- Intro -->
-            <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4 flex items-start gap-3">
-                <i data-lucide="image-plus" class="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5"></i>
-                <div class="text-sm text-indigo-900">
-                    <p class="font-semibold mb-0.5">Manual Figure Updater</p>
-                    <p class="text-indigo-700 text-xs leading-relaxed">
-                        Crop figures from an exam PDF and assign them to questions — replacing
-                        <code class="bg-indigo-100 px-1 rounded">[image here: ...]</code> placeholders or
-                        existing figures. Crops are kept <b>locally</b> while you resize and preview;
-                        clicking <b>Apply Figures to This Question</b> uploads them to your chosen
-                        image host (<b>GitHub + jsDelivr</b>) and writes
-                        them in. Finally, save the JSON.
-                    </p>
-                </div>
-            </div>
-
             <!-- Step 1: Load JSON -->
             <div class="space-y-3">
                 <div class="flex items-center gap-3 flex-wrap">
@@ -545,19 +516,27 @@
                 </div>
             </div>
 
-            <!-- Image hosting (GitHub + jsDelivr) -->
-            <div class="bg-amber-50 border border-amber-100 rounded-xl p-4 space-y-3">
-                <div class="flex items-center gap-2">
-                    <i data-lucide="image-up" class="w-4 h-4 text-amber-600 flex-shrink-0"></i>
-                    <h4 class="font-semibold text-amber-900 text-sm">Image Hosting — GitHub + jsDelivr</h4>
-                </div>
-                <p class="text-xs text-amber-700 leading-relaxed">
-                    Cropped figures are committed to a GitHub repo and served via the
-                    jsDelivr CDN — no rate limits, fast global delivery.
-                </p>
+            <!-- Image hosting (GitHub + jsDelivr) — collapsible settings card -->
+            <div id="fig-host-card" class="bg-white border border-amber-200 rounded-xl overflow-hidden shadow-sm">
+                <button type="button" onclick="figToggleHosting()" class="w-full flex items-center gap-3 px-4 py-3 hover:bg-amber-50/60 transition-colors text-left">
+                    <span class="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
+                        <i data-lucide="image-up" class="w-4 h-4 text-amber-600"></i>
+                    </span>
+                    <span class="flex-1 min-w-0">
+                        <span class="block text-sm font-bold text-gray-800">Image Hosting <span class="text-amber-600 font-semibold">(GitHub + jsDelivr)</span></span>
+                        <span class="block text-xs text-gray-400">Cropped figures are committed to a GitHub repo and served via the jsDelivr CDN.</span>
+                    </span>
+                    <span id="fig-host-status-chip" class="ai-status-chip off flex-shrink-0">Not configured</span>
+                    <i data-lucide="chevron-down" id="fig-host-chevron" class="w-4 h-4 text-gray-400 flex-shrink-0 transition-transform"></i>
+                </button>
+                <div id="fig-host-body" class="hidden border-t border-amber-100 px-4 py-4 space-y-3 bg-amber-50/40">
+                    <p class="text-xs text-amber-700 leading-relaxed">
+                        Cropped figures are committed to a GitHub repo and served via the
+                        jsDelivr CDN — no rate limits, fast global delivery.
+                    </p>
 
-                <!-- GitHub config -->
-                <div id="fig-host-github" class="space-y-2.5">
+                    <!-- GitHub config -->
+                    <div id="fig-host-github" class="space-y-2.5">
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div>
                             <label class="fig-cfg-label">Repository <span class="text-amber-500">(owner/repo)</span></label>
@@ -592,6 +571,7 @@
                         </span>
                     </div>
                     <div id="fig-gh-status" class="text-xs text-amber-700"></div>
+                    </div>
                 </div>
             </div>
 
@@ -749,19 +729,6 @@
 
         <!-- ==================== FRONTEND BUILDER TAB ==================== -->
         <div id="tab-builder" class="hidden space-y-5">
-
-            <!-- Intro -->
-            <div class="bg-violet-50 border border-violet-100 rounded-xl p-4 flex items-start gap-3">
-                <i data-lucide="layout-template" class="w-5 h-5 text-violet-600 flex-shrink-0 mt-0.5"></i>
-                <div class="text-sm text-violet-900">
-                    <p class="font-semibold mb-0.5">Frontend Builder</p>
-                    <p class="text-violet-700 text-xs leading-relaxed">
-                        Visually configure an AI MCQs quiz embed — pick an embedding method,
-                        choose the <b>basic</b> or <b>professional</b> exam interface, tune every
-                        setting, then copy ready-to-paste code for your website.
-                    </p>
-                </div>
-            </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
