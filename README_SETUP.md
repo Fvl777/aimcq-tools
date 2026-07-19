@@ -54,6 +54,32 @@ Replace `USER`, `REPO`, and `v1.0` with your own. You only ever hard-code this
 
 ---
 
+## Step-by-step math solutions
+
+Both the **AI Analysis** panel (Question Editor) and the **Question Extractor**
+have a **"Step-by-step math"** checkbox (checked by default). When enabled,
+if — and only if — a question is numerical/mathematical/quantitative
+(requires a calculation, formula, equation, or step-wise derivation), the
+generated explanation is structured as clearly numbered steps instead of a
+dense paragraph:
+
+```
+Step 1: ...
+Step 2: ...
+Step 3: ...  (final step states the resulting value/answer)
+```
+
+All math stays in LaTeX (`$...$`), the steps still respect the no-option-
+references rule, and — in the Question Editor — still fit inside the
+pre-existing explanation's overall HTML format. Purely conceptual/factual
+questions with no calculation are left as a normal explanation; steps are
+never forced where they don't make sense. Works in both languages (the word
+"Step" is translated for Hindi output) and with both extractor providers —
+in DeepSeek mode, the step structuring happens in DeepSeek's own structuring
+call, after the Gemini/Gemma transcription step.
+
+---
+
 ## Question Extractor (AI — Gemini)
 
 A dedicated **Question Extractor** tab builds a question bank straight from
