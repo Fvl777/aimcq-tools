@@ -93,6 +93,31 @@ joining the text over breaking it.
 
 ---
 
+## Explanation depth — Detailed teaching mode (for weak students)
+
+Both the **Question Extractor** and the Question Editor's **AI Analysis**
+panel now have an **Explanation** depth selector with three levels:
+
+- **Detailed (for weak students)** — the default. The AI is required to
+  teach, not just state: it recalls the key concept/formula and why it
+  applies, shows every intermediate step of the working with a
+  plain-language reason after each, restates the final answer, optionally
+  notes the most common mistake, and targets roughly 120-300 words —
+  short 2-3 sentence answers are explicitly forbidden. This fixes
+  DeepSeek's tendency to return very terse, to-the-point explanations. In
+  bilingual output, both language sides must meet the depth, each in its
+  own language.
+- **Standard** — the previous behavior, no extra depth instruction.
+- **Concise** — explicitly brief, 2-4 essential sentences.
+
+The depth requirement composes with the existing rules (step-by-step math,
+no option references, language matching). In the Question Editor, Detailed
+mode is allowed to exceed the pre-existing explanation sample's length —
+it keeps the sample's tags, styling and structural conventions but expands
+the substance to the required depth.
+
+---
+
 ## Step-by-step math solutions
 
 Both the **AI Analysis** panel (Question Editor) and the **Question Extractor**
