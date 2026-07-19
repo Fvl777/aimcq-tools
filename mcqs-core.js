@@ -6429,7 +6429,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v1.8.0 (Gemini split pipeline — Gemma vision + text-only Gemini generation to cut quota use) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v1.8.1 (DeepSeek V4 models: deepseek-v4-flash default, deepseek-v4-pro; custom model ids for both providers) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -7038,6 +7038,10 @@ function qeAiApply(mode) {
     document.addEventListener('change', function (e) {
         if (e.target && e.target.id === 'ai-model') {
             const customEl = document.getElementById('ai-model-custom');
+            if (customEl) customEl.classList.toggle('hidden', e.target.value !== 'custom');
+        }
+        if (e.target && e.target.id === 'qx-model') {
+            const customEl = document.getElementById('qx-model-custom');
             if (customEl) customEl.classList.toggle('hidden', e.target.value !== 'custom');
         }
         if (e.target && e.target.id === 'qx-vision-model') {
@@ -7895,16 +7899,20 @@ const QX_PROVIDERS = {
             ['gemini-2.0-flash', 'gemini-2.0-flash'],
             ['gemini-1.5-flash', 'gemini-1.5-flash'],
             ['gemini-2.5-pro', 'gemini-2.5-pro (low free quota)'],
+            ['custom', 'Custom model id…'],
         ],
         defaultModel: 'gemini-2.5-flash',
     },
     deepseek: {
         label: 'DeepSeek',
         models: [
-            ['deepseek-chat', 'deepseek-chat (V3 — recommended)'],
-            ['deepseek-reasoner', 'deepseek-reasoner (R1 — deepest reasoning, slower)'],
+            ['deepseek-v4-flash', 'deepseek-v4-flash (V4 — fast, recommended)'],
+            ['deepseek-v4-pro', 'deepseek-v4-pro (V4 — strongest reasoning)'],
+            ['deepseek-chat', 'deepseek-chat (V3)'],
+            ['deepseek-reasoner', 'deepseek-reasoner (R1 — slower)'],
+            ['custom', 'Custom model id…'],
         ],
-        defaultModel: 'deepseek-chat',
+        defaultModel: 'deepseek-v4-flash',
     },
 };
 
@@ -7921,7 +7929,7 @@ let qxPools = {
     provider: 'gemini',
     visionModel: QX_VISION_MODEL_DEFAULT,   // shared image-reading model (Gemma by default)
     gemini:   { model: 'gemini-2.5-flash', keys: [], split: true },
-    deepseek: { model: 'deepseek-chat', keys: [] },
+    deepseek: { model: 'deepseek-v4-flash', keys: [] },
 };
 // key: { id, label, key, disabledUntil }  — disabledUntil: epoch ms (0 = active)
 
@@ -8039,11 +8047,16 @@ function qxPoolRenderKeys() {
 
     // Model options for the active provider
     const modelSel = document.getElementById('qx-model');
+    const modelCustom = document.getElementById('qx-model-custom');
     if (modelSel) {
         modelSel.innerHTML = QX_PROVIDERS[provider].models
             .map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
-        modelSel.value = QX_PROVIDERS[provider].models.some(m => m[0] === pool.model)
-            ? pool.model : QX_PROVIDERS[provider].defaultModel;
+        const knownModel = QX_PROVIDERS[provider].models.some(m => m[0] === pool.model && m[0] !== 'custom');
+        modelSel.value = knownModel ? pool.model : 'custom';
+        if (modelCustom) {
+            modelCustom.classList.toggle('hidden', knownModel);
+            modelCustom.value = knownModel ? '' : (pool.model || '');
+        }
     }
 
     // DeepSeek pipeline note, Gemini split toggle, shared vision-model row
@@ -8129,8 +8142,13 @@ function qxPoolAddKey() {
 
 function qxPoolSave() {
     const modelSel = document.getElementById('qx-model');
+    const modelCustom = document.getElementById('qx-model-custom');
     const pool = qxActivePool();
-    if (modelSel && modelSel.value) pool.model = modelSel.value;
+    if (modelSel && modelSel.value) {
+        pool.model = modelSel.value === 'custom'
+            ? (modelCustom && modelCustom.value.trim()) || QX_PROVIDERS[qxPools.provider].defaultModel
+            : modelSel.value;
+    }
     const visSel = document.getElementById('qx-vision-model');
     const visCustom = document.getElementById('qx-vision-model-custom');
     if (visSel) {
@@ -8184,7 +8202,7 @@ async function aiDeepseekRequest(prompt, opts) {
             'Authorization': 'Bearer ' + (opts.key || ''),
         },
         body: JSON.stringify({
-            model: opts.model || 'deepseek-chat',
+            model: opts.model || 'deepseek-v4-flash',
             messages: [{ role: 'user', content: prompt }],
             temperature: opts.plainText ? 0 : 0.2,
             ...(opts.plainText ? {} : { response_format: { type: 'json_object' } }),
