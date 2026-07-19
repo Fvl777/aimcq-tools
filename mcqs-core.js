@@ -6429,7 +6429,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v1.8.1 (DeepSeek V4 models: deepseek-v4-flash default, deepseek-v4-pro; custom model ids for both providers) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v1.9.0 (explanation depth control — Detailed teaching mode for weak students, default on) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -6774,6 +6774,25 @@ function qeAiCollect() {
 }
 
 // ---------- prompt ----------
+// Shared instruction for how thorough the generated explanation must be.
+// "detailed" is written for weak students: teach, don't just state.
+function aiDetailInstruction(level, pName) {
+    if (level === 'concise') {
+        return 'EXPLANATION DEPTH: keep the explanation brief and to the point — 2-4 sentences covering only the essential reasoning.';
+    }
+    if (level === 'detailed') {
+        return 'EXPLANATION DEPTH (critical — DETAILED teaching mode): the explanation must be thorough enough that a WEAK student meeting this topic for the first time can fully follow it. Do NOT give a short, to-the-point answer. Requirements: '
+            + '(1) briefly define/recall the key concept, term, or formula involved and WHY it applies to this question, in simple language; '
+            + '(2) show EVERY intermediate step of the working — never skip a calculation, substitution, or logical link, even trivial ones; '
+            + '(3) after each step, add a short plain-language reason for what was done and why; '
+            + '(4) end by clearly restating the final answer/value and, where genuinely helpful, add one line about the most common mistake or confusion on such questions; '
+            + '(5) target roughly 120-300 words (longer for multi-step numerical problems) — a 2-3 sentence explanation is NOT acceptable in this mode; '
+            + `(6) keep the language simple and encouraging, entirely in ${pName}, with all math in LaTeX ($...$). `
+            + 'This depth requirement works together with (not instead of) the step-by-step and no-option-reference rules.';
+    }
+    return '';   // standard — no extra depth instruction
+}
+
 // Shared instruction block for step-by-step math explanations. Applies
 // ONLY when the question is numerical/mathematical/quantitative in nature
 // (calculations, formulas, equations, numerical reasoning, physics/chem/
@@ -6782,7 +6801,7 @@ function aiStepsInstruction(pName) {
     return `STEP-BY-STEP MATH SOLUTIONS (when applicable): if — and ONLY if — the question is numerical/mathematical/quantitative (requires a calculation, formula, equation, or step-wise numerical/logical derivation), structure the explanation as clearly numbered steps instead of a dense paragraph: each step on its own line as "<p><b>Step 1:</b> ...</p>", "<p><b>Step 2:</b> ...</p>", etc. (translate the word "Step" into ${pName} if ${pName} is not English), ending with a final step that states the resulting value/answer. Keep all math in LaTeX ($...$). Steps must still obey the FORMAT RULE (fit within the pre-existing explanation's overall HTML container/structure where applicable) and the NO OPTION REFERENCES rule (no option letters in any step). For purely conceptual/factual/definitional questions with no calculation involved, do NOT force artificial steps — keep the existing explanation style.`;
 }
 
-function qeAiBuildPrompt(q, suggestIdx, wantSteps) {
+function qeAiBuildPrompt(q, suggestIdx, wantSteps, detailLevel) {
     const L = i => OPTION_LETTERS[i] || String(i + 1);
     // Human-readable name of the primary content language. For a bilingual
     // file the primary side is English; for a single-language file it is the
@@ -6820,9 +6839,16 @@ function qeAiBuildPrompt(q, suggestIdx, wantSteps) {
         lines.push(`FORMAT RULE (critical): your new explanation ("explanation_html") MUST be written entirely in ${pName} — the SAME language as the question and the pre-existing explanation above — and MUST replicate this pre-existing explanation's HTML format EXACTLY — same tags, same inline styles/classes, same structure and section order, bullet lists, tables, LaTeX delimiters, emphasis conventions, and approximate length. Change ONLY the substantive content so that it correctly justifies the truly correct answer.`);
         lines.push('NO OPTION REFERENCES (critical): the explanation must NOT mention option letters or labels (A/B/C/D), the word "option" / "विकल्प", or phrases like "Correct Answer: (X)" / "सही उत्तर: (X)" / "Option B is right" / "the other options are wrong". Explain the answer\'s substance directly — state the actual answer content itself and justify it conceptually. If the pre-existing explanation contains any option references or per-option elimination parts, replace them with the equivalent substance-based statements (naming the actual answer text/value instead of its letter) while keeping every other aspect of the formatting identical. Do not add new sections that the sample does not have, and do not drop sections it does have.');
         if (wantSteps) lines.push(aiStepsInstruction(pName));
+        const detailInstr = aiDetailInstruction(detailLevel, pName);
+        if (detailInstr) {
+            lines.push(detailInstr);
+            if (detailLevel === 'detailed') lines.push('LENGTH OVERRIDE: the EXPLANATION DEPTH requirement above takes precedence over the "approximate length" part of the FORMAT RULE — keep the sample\'s tags, styling and structural conventions, but expand the substance to the required depth even if that makes it much longer than the sample.');
+        }
     } else {
         lines.push(`PRE-EXISTING EXPLANATION: (none). Use this simple clean HTML format for the new explanation, written entirely in ${pName} (the question's own language): <p><b>concise statement of the correct answer's substance (the actual fact/value/concept — NOT its option letter)</b></p><p>step-by-step conceptual justification</p>. Do NOT reference option letters (A/B/C/D), the word "option" / "विकल्प", or phrases like "Correct Answer: (X)" / "सही उत्तर: (X)" anywhere in the explanation.`);
         if (wantSteps) lines.push(aiStepsInstruction(pName));
+        const detailInstr2 = aiDetailInstruction(detailLevel, pName);
+        if (detailInstr2) lines.push(detailInstr2);
     }
 
     if (q.bilingual && q.hi) {
@@ -6836,9 +6862,11 @@ function qeAiBuildPrompt(q, suggestIdx, wantSteps) {
             lines.push(q.hi.explanation);
             lines.push('-----END HINDI EXPLANATION HTML-----');
             if (wantSteps) lines.push(aiStepsInstruction('HINDI'));
+            { const d = aiDetailInstruction(detailLevel, 'HINDI'); if (d) lines.push('For "explanation_html_hi": ' + d); }
         } else {
             lines.push('PRE-EXISTING HINDI EXPLANATION: (none). Produce "explanation_html_hi" written entirely in Hindi, using the same HTML structure as your English explanation, with the same NO OPTION REFERENCES rule (no option letters, no विकल्प/"option" mentions).');
             if (wantSteps) lines.push(aiStepsInstruction('HINDI'));
+            { const d = aiDetailInstruction(detailLevel, 'HINDI'); if (d) lines.push('For "explanation_html_hi": ' + d); }
         }
     }
 
@@ -6891,12 +6919,13 @@ async function qeAiAnalyze() {
     const sel = document.getElementById('qe-ai-suggest');
     const suggestIdx = (sel && sel.value !== '') ? parseInt(sel.value) : null;
     const wantSteps = !!(document.getElementById('qe-ai-steps') || {}).checked;
+    const detailLevel = (document.getElementById('qe-ai-detail') || {}).value || 'detailed';
 
     qeAiSetBusy(true);
     if (resultBox) resultBox.classList.add('hidden');
 
     try {
-        const raw = await aiGeminiRequest(qeAiBuildPrompt(q, suggestIdx, wantSteps));
+        const raw = await aiGeminiRequest(qeAiBuildPrompt(q, suggestIdx, wantSteps, detailLevel));
         const parsed = aiParseJson(raw);
 
         let ci = parseInt(parsed.correct_index);
@@ -7460,7 +7489,7 @@ function qxScaleCanvas(src, max) {
 }
 
 // ---------- extraction ----------
-function qxBuildPrompt(langMode, transcript, wantSteps) {
+function qxBuildPrompt(langMode, transcript, wantSteps, detailLevel) {
     const L = [];
     L.push('You are an expert exam-question transcriber and subject-matter solver.');
     if (transcript) {
@@ -7486,6 +7515,10 @@ function qxBuildPrompt(langMode, transcript, wantSteps) {
     L.push('- Write an explanation justifying the correct answer. It must NOT mention option letters/labels (A/B/C/D), the word "option"/"विकल्प", or phrases like "Correct Answer: (X)" / "सही उत्तर: (X)" — state and justify the answer\'s substance directly. Simple clean HTML: <p><b>concise statement of the answer\'s substance</b></p><p>step-by-step justification</p>.');
     if (wantSteps) {
         L.push('- STEP-BY-STEP MATH SOLUTIONS (when applicable): if — and ONLY if — the question is numerical/mathematical/quantitative (requires a calculation, formula, equation, or step-wise numerical/logical derivation), structure the explanation as clearly numbered steps instead of a dense paragraph: each step on its own line as "<p><b>Step 1:</b> ...</p>", "<p><b>Step 2:</b> ...</p>", etc. (translate "Step" into the output language if not English), ending with a final step stating the resulting value/answer. Keep all math in LaTeX ($...$). For purely conceptual/factual/definitional questions with no calculation involved, do NOT force artificial steps — a normal clean explanation is fine.');
+    }
+    {
+        const d = aiDetailInstruction(detailLevel, 'the output language');
+        if (d) L.push('- ' + d + (detailLevel === 'detailed' ? ' For bilingual output, BOTH "explanation_html" and "explanation_html_hi" must meet this depth, each in its own language.' : ''));
     }
     L.push('');
     if (langMode === 'en') {
@@ -7531,6 +7564,7 @@ async function qxExtract() {
 
     const langMode = (document.getElementById('qx-lang') || {}).value || 'auto';
     const wantSteps = !!(document.getElementById('qx-steps') || {}).checked;
+    const detailLevel = (document.getElementById('qx-detail') || {}).value || 'detailed';
 
     qxState.busy = true;
     const btn = document.getElementById('qx-extract-btn');
@@ -7539,7 +7573,7 @@ async function qxExtract() {
     if (label) label.textContent = 'Extracting with AI…';
 
     try {
-        const call = await qxRunExtraction(qxBuildPrompt, langMode, b64, wantSteps);
+        const call = await qxRunExtraction(qxBuildPrompt, langMode, b64, wantSteps, detailLevel);
         const raw = call.text;
         const p = aiParseJson(raw);
 
@@ -8286,14 +8320,14 @@ async function qxGeminiTranscribe(imageB64) {
     throw new Error('DeepSeek mode needs a Gemini-API key for reading the image (DeepSeek has no image input). Add a Gemini key to the extractor pool, or configure the Question Editor\'s AI settings.');
 }
 
-async function qxRunExtraction(buildPrompt, langMode, imageB64, wantSteps) {
+async function qxRunExtraction(buildPrompt, langMode, imageB64, wantSteps, detailLevel) {
     const label = document.getElementById('qx-extract-label');
     if (qxPools.provider === 'deepseek') {
         if (label) label.textContent = 'Reading image (vision model)…';
         const transcript = await qxGeminiTranscribe(imageB64);
         if (!transcript || !transcript.trim()) throw new Error('Image transcription came back empty — try a tighter, clearer crop.');
         if (label) label.textContent = 'Structuring with DeepSeek…';
-        return qxAiCall(buildPrompt(langMode, transcript.trim(), wantSteps), {}, 'deepseek');
+        return qxAiCall(buildPrompt(langMode, transcript.trim(), wantSteps, detailLevel), {}, 'deepseek');
     }
     // Gemini provider — split pipeline saves the generation model's vision
     // quota: cheap vision model (Gemma) reads the image, then the selected
@@ -8304,7 +8338,7 @@ async function qxRunExtraction(buildPrompt, langMode, imageB64, wantSteps) {
             const transcript = await qxGeminiTranscribe(imageB64);
             if (!transcript || !transcript.trim()) throw new Error('Image transcription came back empty — try a tighter, clearer crop.');
             if (label) label.textContent = `Generating (${qxPools.gemini.model})…`;
-            return await qxAiCall(buildPrompt(langMode, transcript.trim(), wantSteps), {}, 'gemini');
+            return await qxAiCall(buildPrompt(langMode, transcript.trim(), wantSteps, detailLevel), {}, 'gemini');
         } catch (err) {
             // Vision model missing/unavailable → fall back to the direct
             // multimodal call so extraction still works.
@@ -8313,12 +8347,12 @@ async function qxRunExtraction(buildPrompt, langMode, imageB64, wantSteps) {
                     `"${qxPools.visionModel}" was rejected by the API (${err.message || 'not found'}). Falling back to a single multimodal ${qxPools.gemini.model} call. Fix the vision model id in the Extractor API Settings.`,
                     'info');
                 if (label) label.textContent = 'Extracting with AI…';
-                return qxAiCall(buildPrompt(langMode, undefined, wantSteps), { imageB64, imageMime: 'image/webp' }, 'gemini');
+                return qxAiCall(buildPrompt(langMode, undefined, wantSteps, detailLevel), { imageB64, imageMime: 'image/webp' }, 'gemini');
             }
             throw err;
         }
     }
-    return qxAiCall(buildPrompt(langMode, undefined, wantSteps), { imageB64, imageMime: 'image/webp' }, 'gemini');
+    return qxAiCall(buildPrompt(langMode, undefined, wantSteps, detailLevel), { imageB64, imageMime: 'image/webp' }, 'gemini');
 }
 
 (function qxPoolBoot() {
