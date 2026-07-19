@@ -93,6 +93,26 @@ joining the text over breaking it.
 
 ---
 
+## LaTeX notation — sub/superscripts & degrees everywhere
+
+All AI prompts (Question Extractor transcription + structuring, both
+providers, and the Question Editor's AI Analysis) now enforce a shared
+notation rule: **every superscript, subscript and degree symbol is written
+as KaTeX-renderable LaTeX inside `$...$`**, in math *and* non-math content
+alike — question text, every option, and the whole explanation. Covered
+cases include powers (`$x^2$`, `$10^{-3}$`), units (`$m^2$`, `$km^2$`,
+`$m/s^2$`), chemical formulas (`$H_2O$`, `$CO_2$`, `$C_6H_{12}O_6$`),
+ions/charges (`$Na^+$`, `$SO_4^{2-}$`), isotopes (`$^{235}U$`), angles /
+temperatures / coordinates (`$45^\circ$`, `$30^\circ C$`, `$23.5^\circ N$`,
+`$82.5^\circ E$`), and indexed terms (`$a_n$`, `$v_0$`). Multi-character
+scripts must be braced (`$10^{-3}$`). Raw Unicode script/degree characters
+(², ₂, °, ⁺ …) and HTML `<sub>/<sup>` tags are forbidden — even if the
+source image prints them that way, they're converted to LaTeX during
+transcription, so everything renders consistently through KaTeX in the quiz
+frontends.
+
+---
+
 ## Explanation depth — Detailed teaching mode (for weak students)
 
 Both the **Question Extractor** and the Question Editor's **AI Analysis**
@@ -187,11 +207,21 @@ exam papers. Workflow:
 4. **Review & edit** every field — question, options (add/remove, pick the
    correct one), explanation, Hindi side for bilingual — then
    **Save to Question Bank**.
-5. Repeat for each question. The bank is stored in the browser's
-   **IndexedDB**: it survives refresh and browser close, and entries are
-   removed only via the per-question Delete button (or Delete All, both
-   with confirmation).
-6. **Export JSON** downloads the whole bank in the standard question JSON
+5. Repeat for each question. Questions are saved into **subject
+   libraries**: pick the target library (e.g. Physics, History, Maths)
+   right next to the Save button, or create a new one with the **+**
+   button. The bank card has a library filter (All libraries / specific),
+   shows a library badge on each question in the All view, and remembers
+   your selections. Everything is stored in the browser's **IndexedDB**:
+   it survives refresh and browser close, and entries are removed only via
+   the delete buttons — per-question Delete, a library-scoped **Delete
+   All**, or **Delete library** (removes a custom library plus its
+   questions; the built-in General library can't be deleted). All deletes
+   ask for confirmation. Existing banks from earlier versions migrate
+   automatically into General.
+6. **Export JSON** downloads the currently viewed scope — the selected
+   library (filename includes the library name, JSON includes a `library`
+   field) or all libraries together — in the standard question JSON
    format (`posts` with `_aimcq_options`, `_aimcq_correct_answers`,
    `_aimcq_explanation`, plus `_hi` fields for bilingual) — directly usable
    in the Question Editor, Quiz Builder, and Figure Updater tabs.
