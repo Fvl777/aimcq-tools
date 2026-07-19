@@ -54,6 +54,45 @@ Replace `USER`, `REPO`, and `v1.0` with your own. You only ever hard-code this
 
 ---
 
+## Gemini split pipeline — Gemma vision + text-only generation
+
+To stretch Gemini free-tier limits further, Gemini mode now has a
+**"Split pipeline"** toggle (ON by default) in the Extractor API Settings.
+When on, extraction runs in two cheap stages instead of one expensive
+multimodal call:
+
+1. The shared **vision model** (default `gemma-4-31b-it`, editable dropdown
+   + custom id) reads the crop with a minimal transcription prompt — Gemma
+   draws on its **own separate free quota**.
+2. The selected **Gemini generation model** (e.g. `gemini-2.5-flash`) then
+   runs **text-only** on that transcription to produce the structured
+   question — so its multimodal/vision quota is never touched.
+
+The status chip shows the chain (`gemma-4-31b-it → gemini-2.5-flash`), and
+the Extract button reports each stage. Turn the toggle off for the classic
+single multimodal call. If the vision model id is rejected by the API
+(404/not-supported), extraction automatically falls back to the direct
+multimodal call and tells you — nothing breaks. The vision model setting is
+shared with DeepSeek mode (migrated automatically from earlier versions).
+
+---
+
+## Fix: line breaks now follow genuine breaks, not the image's word-wrap
+
+Earlier, the extractor could copy every visual line-wrap from the cropped
+image as a `<br>` — so a sentence that merely wrapped to the next line
+because of column width came out broken into multiple lines instead of one
+continuous sentence. The transcription and reconstruction prompts (both the
+Gemini direct-vision path and the Gemma/Gemini → DeepSeek hybrid path) now
+explicitly distinguish the two: a `<br>` is only inserted for a **genuine
+logical break** — a new labeled statement/point (A./B./I./II./1./2.), a
+clearly separate sentence/point by the author's intent, or a real paragraph
+break. Plain word-wrap is reflowed back into one continuous line. When the
+AI is unsure which kind of break it's looking at, it's instructed to prefer
+joining the text over breaking it.
+
+---
+
 ## Step-by-step math solutions
 
 Both the **AI Analysis** panel (Question Editor) and the **Question Extractor**
