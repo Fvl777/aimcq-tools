@@ -916,6 +916,15 @@
                     <div id="qx-fields"><!-- primary language fields (rendered by JS) --></div>
                     <div id="qx-fields-hi" class="hidden border-t border-gray-100 pt-4"><!-- hindi fields --></div>
                     <div class="flex items-center gap-2 flex-wrap pt-1">
+                        <div class="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-2.5 py-1" title="Which subject library this question will be saved into">
+                            <i data-lucide="library" class="w-3.5 h-3.5 text-emerald-600"></i>
+                            <label class="text-[10.5px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Library</label>
+                            <select id="qx-save-lib" class="text-xs font-semibold text-gray-700 bg-transparent border-0 py-1 focus:outline-none max-w-[150px]"></select>
+                            <button type="button" id="qx-lib-new" title="Create a new subject library (e.g. Physics, History)"
+                                    class="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded p-0.5">
+                                <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
                         <button id="qx-save-btn" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-lg transition-colors flex items-center gap-1.5">
                             <i data-lucide="database" class="w-4 h-4"></i> Save to Question Bank
                         </button>
@@ -934,12 +943,19 @@
                         <i data-lucide="database" class="w-4 h-4 text-rose-600"></i> Question Bank
                         <span id="qx-bank-count" class="ai-status-chip off">0 questions</span>
                     </p>
-                    <div class="flex items-center gap-2">
-                        <button id="qx-export-btn" class="text-xs bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-3.5 rounded-lg transition-colors flex items-center gap-1.5">
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <div class="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-2.5 py-1" title="Filter the bank by subject library">
+                            <i data-lucide="library" class="w-3.5 h-3.5 text-rose-500"></i>
+                            <select id="qx-lib-view" class="text-xs font-semibold text-gray-700 bg-transparent border-0 py-1 focus:outline-none max-w-[170px]"></select>
+                        </div>
+                        <button id="qx-export-btn" class="text-xs bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-3.5 rounded-lg transition-colors flex items-center gap-1.5" title="Export the questions currently shown (selected library, or all)">
                             <i data-lucide="download" class="w-3.5 h-3.5"></i> Export JSON
                         </button>
-                        <button id="qx-clear-btn" class="text-xs bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-semibold py-2 px-3.5 rounded-lg transition-colors flex items-center gap-1.5">
-                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Delete All
+                        <button id="qx-clear-btn" class="text-xs bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-semibold py-2 px-3.5 rounded-lg transition-colors flex items-center gap-1.5" title="Delete the questions currently shown (selected library, or all)">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> <span id="qx-clear-label">Delete All</span>
+                        </button>
+                        <button id="qx-lib-del" class="hidden text-xs bg-white hover:bg-red-50 text-red-500 border border-red-200 font-semibold py-2 px-3 rounded-lg transition-colors flex items-center gap-1.5" title="Delete this library and all its questions">
+                            <i data-lucide="folder-x" class="w-3.5 h-3.5"></i> Delete library
                         </button>
                     </div>
                 </div>
