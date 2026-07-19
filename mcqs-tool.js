@@ -769,6 +769,8 @@
                         <div>
                             <label class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Model <span class="normal-case font-medium text-gray-400">(shared by this provider's keys)</span></label>
                             <select id="qx-model" class="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-rose-400"></select>
+                            <input type="text" id="qx-model-custom" placeholder="e.g. deepseek-v4-pro"
+                                   class="hidden mt-2 w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-rose-400">
                         </div>
                         <button type="button" onclick="qxPoolAddKey()" class="text-xs bg-white hover:bg-gray-50 text-rose-600 border border-dashed border-rose-300 font-bold py-2 px-3.5 rounded-lg transition-colors flex items-center gap-1.5">
                             <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add API key
