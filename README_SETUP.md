@@ -63,8 +63,24 @@ exam papers. Workflow:
    (screenshot/photo of the paper). Same viewer as the Figure Updater —
    page navigation and zoom included; crop mode is always on.
 2. **Crop one full question** (statement + options), Google-Lens style.
-3. **Extract Question with AI** sends the crop to Gemini (uses the same API
-   key configured in the Question Editor tab's AI settings). The AI
+3. **Extract Question with AI** uses the tab's **own free-tier API pools**
+   ("Extractor API Settings" — fully separate from the Question Editor's
+   key), with a **provider switch between Gemini and DeepSeek**, each with
+   its own model choice and its own multi-key pool. In Gemini mode the crop
+   goes straight to a Gemini vision call. In DeepSeek mode — since
+   DeepSeek's API cannot read images — a Gemini key first transcribes the
+   crop with a minimal plain-text prompt (extractor Gemini pool, or the
+   Question Editor's key as fallback), and DeepSeek then does all the heavy
+   structuring/solving/explanation work, keeping most token usage on your
+   DeepSeek limits. Add multiple keys per provider from separate
+   accounts; they're tried in order, and when the active key hits a
+   quota/rate limit (HTTP 429 — or 402 insufficient balance for DeepSeek)
+   it's automatically deactivated for 24 hours
+   (the free tier's daily reset) and the call retries with the next active
+   key, repeating till the last key. Deactivated keys re-activate on their
+   own after 24 h, or instantly via the per-key Reactivate / "Reset all
+   limits" buttons. The pool (keys, model, cooldowns) lives in localStorage
+   and survives refresh. The AI
    transcribes the question and options exactly (LaTeX as `$...$`,
    `[image here: ...]` placeholders for embedded diagrams — ready for the
    Figure Updater later), solves it if the paper doesn't mark the answer,
