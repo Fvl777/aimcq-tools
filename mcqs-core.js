@@ -6429,7 +6429,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v1.5.0 (Question Extractor tab — AI extraction from PDF core v1.4.0 (figure position picker — place figures anywhere in the question) images with IndexedDB question bank) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v1.6.0 (extractor: Gemini + DeepSeek provider switch, per-provider key pools) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -6552,8 +6552,7 @@ function aiClearSettings() {
 function aiUpdateStatusChips() {
     const on = aiConfigured();
     [['ai-settings-status', on ? `Ready · ${aiEffectiveModel()}` : 'Not configured'],
-     ['qe-ai-status',       on ? `Ready · ${aiEffectiveModel()}` : 'Not configured — see AI settings in Editor tab'],
-     ['qx-ai-status',       on ? `Ready · ${aiEffectiveModel()}` : 'Not configured — see AI settings in Editor tab']]
+     ['qe-ai-status',       on ? `Ready · ${aiEffectiveModel()}` : 'Not configured — see AI settings in Editor tab']]
     .forEach(([id, label]) => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -7390,13 +7389,21 @@ function qxScaleCanvas(src, max) {
 }
 
 // ---------- extraction ----------
-function qxBuildPrompt(langMode) {
+function qxBuildPrompt(langMode, transcript) {
     const L = [];
     L.push('You are an expert exam-question transcriber and subject-matter solver.');
-    L.push('The attached image is a crop of ONE multiple-choice question from an exam paper. Transcribe it faithfully and completely, then solve it.');
+    if (transcript) {
+        L.push('Below is a raw, exact transcription of ONE multiple-choice question cropped from an exam paper (produced by an OCR/vision step — minor artifacts possible). Reconstruct it faithfully and completely, then solve it.');
+        L.push('');
+        L.push('-----BEGIN TRANSCRIPTION-----');
+        L.push(transcript);
+        L.push('-----END TRANSCRIPTION-----');
+    } else {
+        L.push('The attached image is a crop of ONE multiple-choice question from an exam paper. Transcribe it faithfully and completely, then solve it.');
+    }
     L.push('');
     L.push('TRANSCRIPTION RULES:');
-    L.push('- Transcribe the question text EXACTLY as printed (fix only obvious OCR-level artifacts). Preserve line structure using <br> between lines/statements. Use minimal clean HTML (<b>, <i>, <br>, <sub>, <sup>).');
+    L.push(`- ${transcript ? 'Reconstruct the question text EXACTLY as transcribed (fix only obvious OCR-level artifacts)' : 'Transcribe the question text EXACTLY as printed (fix only obvious OCR-level artifacts)'}. Preserve line structure using <br> between lines/statements. Use minimal clean HTML (<b>, <i>, <br>, <sub>, <sup>).`);
     L.push('- Mathematical content must be written as LaTeX between $...$ delimiters.');
     L.push('- Do NOT include the question number prefix (e.g. "20.", "Q7)") in the question text.');
     L.push('- If the question contains a diagram/figure/graph, insert the placeholder [image here: <very short description>] at its exact position in the question text — do not try to describe the figure in full.');
@@ -7434,9 +7441,9 @@ function qxBuildPrompt(langMode) {
 
 async function qxExtract() {
     if (qxState.busy) return;
-    if (!aiConfigured()) {
-        showToast('Gemini not configured',
-            'Open "AI Question Update (Gemini API)" settings in the Question Editor tab and save your API key first.', 'error');
+    if (!qxPoolActiveKeys().length && !qxPoolConfiguredKeys().length) {
+        showToast('Extractor keys missing',
+            `No ${QX_PROVIDERS[qxPools.provider].label} keys configured — open "Extractor API Settings" at the top of this tab and add at least one key (or switch provider).`, 'error');
         return;
     }
     const crop = qxGetCropCanvas();
@@ -7456,7 +7463,8 @@ async function qxExtract() {
     if (label) label.textContent = 'Extracting with AI…';
 
     try {
-        const raw = await aiGeminiRequest(qxBuildPrompt(langMode), { imageB64: b64, imageMime: 'image/webp' });
+        const call = await qxRunExtraction(qxBuildPrompt, langMode, b64);
+        const raw = call.text;
         const p = aiParseJson(raw);
 
         if (typeof p.question_html !== 'string' || !p.question_html.trim()) throw new Error('AI returned no question text.');
@@ -7784,4 +7792,369 @@ async function qxExportBank() {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
     else wire();
     setTimeout(() => { try { if (!document.getElementById('qx-bank-list').__wired) qxRenderBank(); } catch (e) {} }, 900);
+})();
+
+// ============================================================
+// == EXTRACTOR API POOLS (Gemini + DeepSeek, key rotation) ===
+// ============================================================
+// The Question Extractor has its OWN API configuration with TWO
+// providers — Gemini and DeepSeek — switchable at any time. Each
+// provider keeps an independent POOL of keys (one per account).
+// Keys are tried in order; a quota/limit error deactivates that
+// key for 24 h (daily free-limit reset) and the call automatically
+// retries with the next active key, till the last key. Cooldowns
+// expire on their own (= the 24 h reset) or via Reactivate.
+//
+// DeepSeek's API cannot read images, so in DeepSeek mode the crop
+// is first transcribed by a Gemini key with a minimal plain-text
+// prompt (cheap), and DeepSeek then does the heavy structuring /
+// solving / explanation work on the transcription — keeping most
+// token usage on the DeepSeek side.
+
+const QX_POOL_LS_KEY = 'aimcq_qx_api_pools';
+const QX_POOL_LS_KEY_LEGACY = 'aimcq_qx_gemini_pool';
+const QX_LIMIT_COOLDOWN_MS = 24 * 60 * 60 * 1000;   // 24 hours
+
+const QX_PROVIDERS = {
+    gemini: {
+        label: 'Gemini',
+        models: [
+            ['gemini-2.5-flash', 'gemini-2.5-flash (recommended for free tier)'],
+            ['gemini-2.0-flash', 'gemini-2.0-flash'],
+            ['gemini-1.5-flash', 'gemini-1.5-flash'],
+            ['gemini-2.5-pro', 'gemini-2.5-pro (low free quota)'],
+        ],
+        defaultModel: 'gemini-2.5-flash',
+    },
+    deepseek: {
+        label: 'DeepSeek',
+        models: [
+            ['deepseek-chat', 'deepseek-chat (V3 — recommended)'],
+            ['deepseek-reasoner', 'deepseek-reasoner (R1 — deepest reasoning, slower)'],
+        ],
+        defaultModel: 'deepseek-chat',
+    },
+};
+
+let qxPools = {
+    provider: 'gemini',
+    gemini:   { model: 'gemini-2.5-flash', keys: [] },
+    deepseek: { model: 'deepseek-chat', keys: [] },
+};
+// key: { id, label, key, disabledUntil }  — disabledUntil: epoch ms (0 = active)
+
+function qxNormKeys(arr) {
+    return Array.isArray(arr) ? arr.filter(k => k && typeof k === 'object').map((k, i) => ({
+        id: k.id || ('k' + i + '-' + Date.now()),
+        label: k.label || `Key ${i + 1}`,
+        key: k.key || '',
+        disabledUntil: parseInt(k.disabledUntil, 10) || 0,
+    })) : [];
+}
+
+function qxPoolLoad() {
+    try {
+        const raw = localStorage.getItem(QX_POOL_LS_KEY);
+        if (raw) {
+            const p = JSON.parse(raw);
+            if (p && typeof p === 'object') {
+                qxPools.provider = (p.provider === 'deepseek') ? 'deepseek' : 'gemini';
+                ['gemini', 'deepseek'].forEach(pr => {
+                    const src = p[pr] || {};
+                    qxPools[pr].model = src.model || QX_PROVIDERS[pr].defaultModel;
+                    qxPools[pr].keys = qxNormKeys(src.keys);
+                });
+            }
+        } else {
+            // Migrate the old single-provider (Gemini) pool if present.
+            const legacy = localStorage.getItem(QX_POOL_LS_KEY_LEGACY);
+            if (legacy) {
+                const lp = JSON.parse(legacy);
+                if (lp && typeof lp === 'object') {
+                    qxPools.gemini.model = lp.model || QX_PROVIDERS.gemini.defaultModel;
+                    qxPools.gemini.keys = qxNormKeys(lp.keys);
+                    qxPoolPersist();
+                }
+            }
+        }
+    } catch (e) {}
+    qxPoolRenderKeys();
+    qxPoolUpdateChip();
+}
+
+function qxPoolPersist() {
+    try { localStorage.setItem(QX_POOL_LS_KEY, JSON.stringify(qxPools)); } catch (e) {}
+}
+
+function qxActivePool() { return qxPools[qxPools.provider]; }
+function qxKeyActive(k) { return !!(k && k.key && (!k.disabledUntil || k.disabledUntil <= Date.now())); }
+function qxPoolActiveKeys(provider) { return qxPools[provider || qxPools.provider].keys.filter(qxKeyActive); }
+function qxPoolConfiguredKeys(provider) { return qxPools[provider || qxPools.provider].keys.filter(k => k.key); }
+
+function qxFmtCooldown(until) {
+    const ms = until - Date.now();
+    if (ms <= 0) return 'now';
+    const h = Math.floor(ms / 3600000), m = Math.ceil((ms % 3600000) / 60000);
+    return (h ? `${h}h ` : '') + `${m}m`;
+}
+
+// ---------- settings card UI ----------
+function qxToggleApiSettings() {
+    const body = document.getElementById('qx-api-body');
+    const chev = document.getElementById('qx-api-chevron');
+    if (!body) return;
+    const nowHidden = body.classList.toggle('hidden');
+    if (chev) chev.style.transform = nowHidden ? '' : 'rotate(180deg)';
+    if (!nowHidden) qxPoolRenderKeys();
+    try { lucide.createIcons(); } catch (e) {}
+}
+
+function qxSetProvider(p) {
+    if (!QX_PROVIDERS[p]) return;
+    qxPools.provider = p;
+    qxPoolPersist();
+    qxPoolRenderKeys();
+    qxPoolUpdateChip();
+}
+
+function qxPoolUpdateChip() {
+    const chip = document.getElementById('qx-ai-status');
+    if (!chip) return;
+    const prName = QX_PROVIDERS[qxPools.provider].label;
+    const total = qxPoolConfiguredKeys().length;
+    const active = qxPoolActiveKeys().length;
+    let text, on;
+    if (!total) { text = `${prName} · not configured`; on = false; }
+    else if (!active) { text = `${prName} · all ${total} keys limit-hit — auto-resets in 24h`; on = false; }
+    else { text = `${prName} · ${active}/${total} keys active · ${qxActivePool().model}`; on = true; }
+    chip.textContent = text;
+    chip.classList.toggle('on', on);
+    chip.classList.toggle('off', !on);
+}
+
+function qxPoolRenderKeys() {
+    const list = document.getElementById('qx-keys-list');
+    if (!list) return;
+    const provider = qxPools.provider;
+    const pool = qxActivePool();
+
+    // Provider switch state
+    const sw = document.getElementById('qx-provider-switch');
+    if (sw) sw.querySelectorAll('button').forEach(b =>
+        b.classList.toggle('active', b.getAttribute('data-provider') === provider));
+
+    // Model options for the active provider
+    const modelSel = document.getElementById('qx-model');
+    if (modelSel) {
+        modelSel.innerHTML = QX_PROVIDERS[provider].models
+            .map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+        modelSel.value = QX_PROVIDERS[provider].models.some(m => m[0] === pool.model)
+            ? pool.model : QX_PROVIDERS[provider].defaultModel;
+    }
+
+    // DeepSeek pipeline note
+    const dsNote = document.getElementById('qx-deepseek-note');
+    if (dsNote) dsNote.classList.toggle('hidden', provider !== 'deepseek');
+
+    if (!pool.keys.length) {
+        list.innerHTML = `<p class="text-xs text-gray-400 py-1">No ${QX_PROVIDERS[provider].label} keys yet — click <b>Add API key</b> to add your first key.</p>`;
+        return;
+    }
+    list.innerHTML = pool.keys.map((k, i) => {
+        const active = qxKeyActive(k);
+        const limited = k.key && !active;
+        return `
+        <div class="qx-key-row ${limited ? 'limited' : ''}" data-id="${k.id}">
+            <span class="qx-key-order">${i + 1}</span>
+            <input type="text" class="qx-key-label" data-field="label" value="${qxEsc(k.label)}" placeholder="Account name">
+            <input type="password" class="qx-key-input" data-field="key" value="${qxEsc(k.key)}" placeholder="${provider === 'deepseek' ? 'sk-...' : 'AIza...'}" autocomplete="off">
+            <span class="qx-key-status ${limited ? 'bad' : (k.key ? 'ok' : '')}">${
+                !k.key ? 'empty'
+                : limited ? `limit hit · resets in ${qxFmtCooldown(k.disabledUntil)}`
+                : 'active'}</span>
+            ${limited ? `<button type="button" class="qx-key-btn qx-key-react" data-id="${k.id}" title="Mark active again now"><i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i></button>` : ''}
+            <button type="button" class="qx-key-btn qx-key-del" data-id="${k.id}" title="Remove this key"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('.qx-key-row input').forEach(inp => {
+        inp.addEventListener('input', () => {
+            const row = inp.closest('.qx-key-row');
+            const k = pool.keys.find(x => x.id === row.getAttribute('data-id'));
+            if (k) k[inp.getAttribute('data-field')] = inp.value.trim();
+        });
+    });
+    list.querySelectorAll('.qx-key-del').forEach(b => b.addEventListener('click', () => {
+        pool.keys = pool.keys.filter(x => x.id !== b.getAttribute('data-id'));
+        qxPoolPersist();
+        qxPoolRenderKeys();
+        qxPoolUpdateChip();
+    }));
+    list.querySelectorAll('.qx-key-react').forEach(b => b.addEventListener('click', () => {
+        const k = pool.keys.find(x => x.id === b.getAttribute('data-id'));
+        if (k) { k.disabledUntil = 0; qxPoolPersist(); qxPoolRenderKeys(); qxPoolUpdateChip(); }
+    }));
+    lucide.createIcons();
+}
+
+function qxPoolAddKey() {
+    const pool = qxActivePool();
+    pool.keys.push({
+        id: 'k' + Date.now() + '-' + Math.floor(Math.random() * 1e5),
+        label: `Account ${pool.keys.length + 1}`,
+        key: '',
+        disabledUntil: 0,
+    });
+    qxPoolRenderKeys();
+}
+
+function qxPoolSave() {
+    const modelSel = document.getElementById('qx-model');
+    const pool = qxActivePool();
+    if (modelSel && modelSel.value) pool.model = modelSel.value;
+    pool.keys = pool.keys.filter(k => k.key || k.label);
+    qxPoolPersist();
+    qxPoolRenderKeys();
+    qxPoolUpdateChip();
+    const n = qxPoolConfiguredKeys().length;
+    const prName = QX_PROVIDERS[qxPools.provider].label;
+    showToast('Extractor API pool saved',
+        n ? `${prName}: ${n} key${n === 1 ? '' : 's'} · model ${pool.model}. Keys rotate automatically on limit.`
+          : `${prName} pool saved, but no usable keys yet — paste at least one API key.`,
+        n ? 'success' : 'info');
+}
+
+function qxPoolResetLimits() {
+    qxActivePool().keys.forEach(k => { k.disabledUntil = 0; });
+    qxPoolPersist();
+    qxPoolRenderKeys();
+    qxPoolUpdateChip();
+    showToast('Limits reset', `All ${QX_PROVIDERS[qxPools.provider].label} keys marked active again.`, 'success');
+}
+
+function qxPoolMarkLimited(k) {
+    k.disabledUntil = Date.now() + QX_LIMIT_COOLDOWN_MS;
+    qxPoolPersist();
+    qxPoolRenderKeys();
+    qxPoolUpdateChip();
+}
+
+function qxIsLimitError(err) {
+    if (!err) return false;
+    if (err.status === 429) return true;
+    if (err.status === 402) return true;   // DeepSeek: insufficient balance
+    return /RESOURCE_EXHAUSTED|quota|rate limit|insufficient balance/i.test(err.message || '');
+}
+
+// ---------- DeepSeek transport (OpenAI-compatible) ----------
+async function aiDeepseekRequest(prompt, opts) {
+    opts = opts || {};
+    const resp = await fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + (opts.key || ''),
+        },
+        body: JSON.stringify({
+            model: opts.model || 'deepseek-chat',
+            messages: [{ role: 'user', content: prompt }],
+            temperature: opts.plainText ? 0 : 0.2,
+            ...(opts.plainText ? {} : { response_format: { type: 'json_object' } }),
+        }),
+    });
+    if (!resp.ok) {
+        let detail = '';
+        try { const j = await resp.json(); detail = (j.error && j.error.message) || ''; } catch (e) {}
+        const err = new Error(detail || `HTTP ${resp.status}`);
+        err.status = resp.status;
+        throw err;
+    }
+    const data = await resp.json();
+    const text = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    if (!text) throw new Error('Empty response from DeepSeek');
+    return text;
+}
+
+// ---------- failover call within a provider's pool ----------
+async function qxAiCall(prompt, opts, provider) {
+    provider = provider || qxPools.provider;
+    const prName = QX_PROVIDERS[provider].label;
+    const pool = qxPools[provider];
+    const candidates = pool.keys.filter(qxKeyActive);
+    if (!candidates.length) {
+        const configured = pool.keys.filter(k => k.key);
+        if (!configured.length) {
+            throw new Error(`No ${prName} keys configured in the Extractor API Settings.`);
+        }
+        const soonest = Math.min(...configured.map(k => k.disabledUntil || 0));
+        throw new Error(`All ${configured.length} ${prName} keys have hit their limits. They re-activate automatically — earliest in ${qxFmtCooldown(soonest)} (or use "Reset all limits"${provider !== qxPools.provider ? '' : ', or switch provider'}).`);
+    }
+    for (const k of candidates) {
+        try {
+            const text = provider === 'deepseek'
+                ? await aiDeepseekRequest(prompt, Object.assign({}, opts, { key: k.key, model: pool.model }))
+                : await aiGeminiRequest(prompt, Object.assign({}, opts, { key: k.key, model: pool.model }));
+            return { text, keyUsed: k, provider };
+        } catch (err) {
+            if (qxIsLimitError(err)) {
+                qxPoolMarkLimited(k);
+                showToast('API limit hit — switching key',
+                    `${prName} key "${k.label}" hit its limit and is deactivated for 24h. Trying the next key…`, 'info');
+                continue;
+            }
+            throw err;
+        }
+    }
+    throw new Error(`All ${prName} keys hit their limits during this call. They re-activate automatically after 24h (or use "Reset all limits").`);
+}
+
+// ---------- extraction pipeline (provider-aware) ----------
+// Gemini: single multimodal call (image + full prompt).
+// DeepSeek: (1) minimal Gemini transcription of the crop, (2) DeepSeek
+// receives the transcription and does structuring/solving/explanation.
+const QX_TRANSCRIBE_PROMPT =
+    'Transcribe ALL text visible in this image EXACTLY, preserving line breaks and reading order. ' +
+    'Write mathematical content as LaTeX between $...$ delimiters. ' +
+    'If a diagram/figure/graph appears, write [image here: <very short description>] at its position. ' +
+    'Include any printed answer marking. Output ONLY the raw transcription — no commentary.';
+
+async function qxGeminiTranscribe(imageB64) {
+    // Prefer the extractor's Gemini pool (with failover); fall back to the
+    // Question Editor's Gemini key if the pool is empty.
+    if (qxPoolConfiguredKeys('gemini').length) {
+        const call = await qxAiCall(QX_TRANSCRIBE_PROMPT,
+            { imageB64, imageMime: 'image/webp', plainText: true }, 'gemini');
+        return call.text;
+    }
+    if (typeof aiConfigured === 'function' && aiConfigured()) {
+        return aiGeminiRequest(QX_TRANSCRIBE_PROMPT,
+            { imageB64, imageMime: 'image/webp', plainText: true });
+    }
+    throw new Error('DeepSeek mode needs a Gemini key for reading the image (DeepSeek has no image input). Add a Gemini key to the extractor pool, or configure the Question Editor\'s AI settings.');
+}
+
+async function qxRunExtraction(buildPrompt, langMode, imageB64) {
+    if (qxPools.provider === 'deepseek') {
+        const label = document.getElementById('qx-extract-label');
+        if (label) label.textContent = 'Reading image (Gemini)…';
+        const transcript = await qxGeminiTranscribe(imageB64);
+        if (!transcript || !transcript.trim()) throw new Error('Image transcription came back empty — try a tighter, clearer crop.');
+        if (label) label.textContent = 'Structuring with DeepSeek…';
+        return qxAiCall(buildPrompt(langMode, transcript.trim()), {}, 'deepseek');
+    }
+    return qxAiCall(buildPrompt(langMode), { imageB64, imageMime: 'image/webp' }, 'gemini');
+}
+
+(function qxPoolBoot() {
+    function init() { qxPoolLoad(); }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+    setTimeout(function () { try { qxPoolLoad(); } catch (e) {} }, 850);
+    setInterval(function () {
+        try {
+            qxPoolUpdateChip();
+            const body = document.getElementById('qx-api-body');
+            if (body && !body.classList.contains('hidden')) qxPoolRenderKeys();
+        } catch (e) {}
+    }, 60000);
 })();
