@@ -94,7 +94,7 @@ function figUnlinkDrive() {}
 
 // ==================== TABS ====================
 function switchTab(tab) {
-    const tabs = ['split','combine','quizbuilder','editor','figures','builder'];
+    const tabs = ['split','combine','quizbuilder','editor','figures','extractor','builder'];
     tabs.forEach(t => {
         document.getElementById(`tab-${t}`).classList.toggle('hidden', t !== tab);
         const btn = document.getElementById(`tab-btn-${t}`);
@@ -6429,7 +6429,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v1.4.0 (figure position picker — place figures anywhere in the question) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v1.5.0 (Question Extractor tab — AI extraction from PDF core v1.4.0 (figure position picker — place figures anywhere in the question) images with IndexedDB question bank) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -6552,7 +6552,8 @@ function aiClearSettings() {
 function aiUpdateStatusChips() {
     const on = aiConfigured();
     [['ai-settings-status', on ? `Ready · ${aiEffectiveModel()}` : 'Not configured'],
-     ['qe-ai-status',       on ? `Ready · ${aiEffectiveModel()}` : 'Not configured — see AI settings in Editor tab']]
+     ['qe-ai-status',       on ? `Ready · ${aiEffectiveModel()}` : 'Not configured — see AI settings in Editor tab'],
+     ['qx-ai-status',       on ? `Ready · ${aiEffectiveModel()}` : 'Not configured — see AI settings in Editor tab']]
     .forEach(([id, label]) => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -6588,8 +6589,16 @@ async function aiGeminiRequest(prompt, opts) {
     const model = opts.model || aiEffectiveModel();
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
 
+    // Multimodal support: opts.imageB64 (+ opts.imageMime) attaches an image
+    // part before the text prompt — used by the Question Extractor.
+    const userParts = [];
+    if (opts.imageB64) {
+        userParts.push({ inline_data: { mime_type: opts.imageMime || 'image/webp', data: opts.imageB64 } });
+    }
+    userParts.push({ text: prompt });
+
     const body = {
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        contents: [{ role: 'user', parts: userParts }],
         generationConfig: opts.plainText
             ? { temperature: 0 }
             : { temperature: 0.2, responseMimeType: 'application/json' }
@@ -7152,4 +7161,627 @@ function figRenderQPosPicker() {
         orig.apply(this, arguments);
         try { figRenderQPosPicker(); } catch (e) {}
     };
+})();
+
+// ============================================================
+// ============ QUESTION EXTRACTOR (AI, Gemini) ===============
+// ============================================================
+// Crop individual questions from an exam PDF/image (Google-Lens
+// style), send the crop to Gemini for transcription into question
+// + options + correct answer + explanation, review/edit, and save
+// into a persistent IndexedDB question bank. The bank survives
+// refresh and browser close; records are removed only via the
+// Delete buttons. Export produces the standard question JSON.
+
+const qxState = {
+    pdfDoc: null, srcType: '', pageNum: 1,
+    scale: 1, fitDispW: 0, fitDispH: 0,
+    rendering: false, pendingPage: null,
+    cropper: null,
+    result: null,          // current AI extraction under review
+    cropThumb: '',         // small dataURL of the crop (stored with record)
+    busy: false,
+};
+
+// ---------- IndexedDB question bank ----------
+const QX_DB_NAME = 'aimcq_question_bank';
+const QX_STORE = 'questions';
+
+function qxOpenDb() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(QX_DB_NAME, 1);
+        req.onupgradeneeded = e => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains(QX_STORE)) {
+                db.createObjectStore(QX_STORE, { keyPath: 'id' });
+            }
+        };
+        req.onsuccess = e => resolve(e.target.result);
+        req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
+    });
+}
+
+function qxDbOp(mode, fn) {
+    return qxOpenDb().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(QX_STORE, mode);
+        const store = tx.objectStore(QX_STORE);
+        const out = fn(store);
+        tx.oncomplete = () => { db.close(); resolve(out && out.__result !== undefined ? out.__result : undefined); };
+        tx.onerror = () => { db.close(); reject(tx.error || new Error('IndexedDB transaction failed')); };
+    }));
+}
+
+function qxDbPut(rec) { return qxDbOp('readwrite', s => { s.put(rec); }); }
+function qxDbDelete(id) { return qxDbOp('readwrite', s => { s.delete(id); }); }
+function qxDbClear() { return qxDbOp('readwrite', s => { s.clear(); }); }
+function qxDbAll() {
+    return qxOpenDb().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(QX_STORE, 'readonly');
+        const req = tx.objectStore(QX_STORE).getAll();
+        req.onsuccess = () => { db.close(); resolve(req.result || []); };
+        req.onerror = () => { db.close(); reject(req.error); };
+    }));
+}
+
+// ---------- viewer (mirrors the Figure Updater's canvas) ----------
+function qxHasSource() { return !!(qxState.pdfDoc || qxState.srcType === 'image'); }
+
+function qxApplyZoom() {
+    const canvas = document.getElementById('qx-canvas');
+    if (!canvas || !qxHasSource()) return;
+    const dispW = Math.max(1, Math.round(qxState.fitDispW * qxState.scale));
+    const dispH = Math.max(1, Math.round(qxState.fitDispH * qxState.scale));
+    canvas.style.width = dispW + 'px';
+    canvas.style.height = dispH + 'px';
+    const zv = document.getElementById('qx-zoom-val');
+    if (zv) zv.value = Math.round(qxState.scale * 100) + '%';
+    if (qxState.cropper) {
+        const data = qxState.cropper.getData();
+        qxEnableCropper(data);
+    }
+}
+
+function qxEnableCropper(keepData) {
+    const canvas = document.getElementById('qx-canvas');
+    if (!canvas || typeof Cropper === 'undefined') return;
+    if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
+    qxState.cropper = new Cropper(canvas, {
+        viewMode: 1, dragMode: 'crop', autoCrop: false,
+        movable: false, zoomable: false, rotatable: false, scalable: false,
+        background: false, checkCrossOrigin: false,
+        ready() { if (keepData) { try { qxState.cropper.setData(keepData); } catch (e) {} } },
+    });
+}
+
+function qxRenderPdfPage(num) {
+    if (!qxState.pdfDoc) return;
+    qxState.srcType = 'pdf';
+    qxState.rendering = true;
+    const canvas = document.getElementById('qx-canvas');
+    const ctx = canvas.getContext('2d');
+    qxState.pdfDoc.getPage(num).then(page => {
+        const scroll = document.getElementById('qx-pdf-scroll');
+        const containerWidth = Math.max(scroll.clientWidth - 4, 200);
+        const unscaled = page.getViewport({ scale: 1 });
+        const fitScale = containerWidth / unscaled.width;
+        const RASTER = 2.5;
+        const vp = page.getViewport({ scale: fitScale * RASTER });
+        canvas.width = vp.width;
+        canvas.height = vp.height;
+        qxState.fitDispW = canvas.width / RASTER;
+        qxState.fitDispH = canvas.height / RASTER;
+        if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
+        page.render({ canvasContext: ctx, viewport: vp }).promise.then(() => {
+            qxState.rendering = false;
+            qxApplyZoom();
+            qxEnableCropper();      // crop mode is always ON in the extractor
+            if (qxState.pendingPage !== null) {
+                const p = qxState.pendingPage;
+                qxState.pendingPage = null;
+                qxRenderPdfPage(p);
+            }
+        });
+    });
+    const cp = document.getElementById('qx-cur-page');
+    if (cp) cp.textContent = num;
+}
+
+function qxRenderImage(file) {
+    const canvas = document.getElementById('qx-canvas');
+    if (!canvas) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = function () {
+        const natW = img.naturalWidth || 1, natH = img.naturalHeight || 1;
+        canvas.width = natW; canvas.height = natH;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, natW, natH);
+        ctx.drawImage(img, 0, 0, natW, natH);
+        URL.revokeObjectURL(url);
+        const scroll = document.getElementById('qx-pdf-scroll');
+        const containerWidth = Math.max(scroll.clientWidth - 4, 200);
+        qxState.fitDispW = Math.min(natW, containerWidth);
+        qxState.fitDispH = qxState.fitDispW * (natH / natW);
+        qxState.srcType = 'image';
+        qxState.pdfDoc = null;
+        qxState.pageNum = 1;
+        if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
+        qxApplyZoom();
+        qxEnableCropper();
+        document.getElementById('qx-cur-page').textContent = '1';
+        document.getElementById('qx-total-pages').textContent = '1';
+        qxUpdateNav();
+    };
+    img.onerror = function () {
+        URL.revokeObjectURL(url);
+        showToast('Image error', 'Could not load that image file.', 'error');
+    };
+    img.src = url;
+}
+
+function qxUpdateNav() {
+    const isImg = qxState.srcType === 'image';
+    const prev = document.getElementById('qx-prev-page');
+    const next = document.getElementById('qx-next-page');
+    if (prev) prev.disabled = isImg;
+    if (next) next.disabled = isImg;
+}
+
+function qxShowWorkspace() {
+    document.getElementById('qx-workspace').classList.remove('hidden');
+    document.getElementById('qx-source-pick').classList.add('hidden');
+}
+
+function qxLoadPdfFile(file) {
+    if (typeof pdfjsLib === 'undefined') {
+        showToast('PDF engine missing', 'pdf.js failed to load — refresh and try again.', 'error');
+        return;
+    }
+    const reader = new FileReader();
+    reader.onload = e => {
+        const docParams = { data: new Uint8Array(e.target.result) };
+        if (window.pdfjsWorkerDisabled) docParams.disableWorker = true;
+        pdfjsLib.getDocument(docParams).promise.then(doc => {
+            qxState.pdfDoc = doc;
+            qxState.pageNum = 1;
+            qxState.scale = 1;
+            document.getElementById('qx-total-pages').textContent = doc.numPages;
+            qxShowWorkspace();
+            qxUpdateNav();
+            qxRenderPdfPage(1);
+        }).catch(err => showToast('PDF error', err.message || String(err), 'error'));
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+function qxGetCropCanvas() {
+    if (!qxState.cropper) {
+        showToast('No cropper', 'Load a PDF or image first.', 'error');
+        return null;
+    }
+    const data = qxState.cropper.getData(true);
+    if (!data || data.width < 2 || data.height < 2) {
+        showToast('No selection', 'Drag a box around one complete question first.', 'error');
+        return null;
+    }
+    const out = qxState.cropper.getCroppedCanvas({
+        width: Math.round(data.width), height: Math.round(data.height),
+        imageSmoothingEnabled: true, imageSmoothingQuality: 'high',
+    });
+    if (!out || !out.width || !out.height) {
+        showToast('Invalid crop', 'The crop area is empty.', 'error');
+        return null;
+    }
+    return out;
+}
+
+// Downscale a canvas so its longest side <= max (API payload size control).
+function qxScaleCanvas(src, max) {
+    const ratio = Math.min(1, max / Math.max(src.width, src.height));
+    if (ratio >= 1) return src;
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(src.width * ratio));
+    c.height = Math.max(1, Math.round(src.height * ratio));
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, 0, 0, c.width, c.height);
+    return c;
+}
+
+// ---------- extraction ----------
+function qxBuildPrompt(langMode) {
+    const L = [];
+    L.push('You are an expert exam-question transcriber and subject-matter solver.');
+    L.push('The attached image is a crop of ONE multiple-choice question from an exam paper. Transcribe it faithfully and completely, then solve it.');
+    L.push('');
+    L.push('TRANSCRIPTION RULES:');
+    L.push('- Transcribe the question text EXACTLY as printed (fix only obvious OCR-level artifacts). Preserve line structure using <br> between lines/statements. Use minimal clean HTML (<b>, <i>, <br>, <sub>, <sup>).');
+    L.push('- Mathematical content must be written as LaTeX between $...$ delimiters.');
+    L.push('- Do NOT include the question number prefix (e.g. "20.", "Q7)") in the question text.');
+    L.push('- If the question contains a diagram/figure/graph, insert the placeholder [image here: <very short description>] at its exact position in the question text — do not try to describe the figure in full.');
+    L.push('- Transcribe ALL options in order, WITHOUT their labels ("(1)", "(a)", "A." etc.). If an option is a figure, use [image here: <short description>] as that option\'s text.');
+    L.push('');
+    L.push('ANSWER & EXPLANATION:');
+    L.push('- If the paper marks the correct answer, use it. Otherwise SOLVE the question rigorously yourself to determine "correct_index" (0-based).');
+    L.push('- Write an explanation justifying the correct answer. It must NOT mention option letters/labels (A/B/C/D), the word "option"/"विकल्प", or phrases like "Correct Answer: (X)" / "सही उत्तर: (X)" — state and justify the answer\'s substance directly. Simple clean HTML: <p><b>concise statement of the answer\'s substance</b></p><p>step-by-step justification</p>.');
+    L.push('');
+    if (langMode === 'en') {
+        L.push('OUTPUT LANGUAGE: English only ("language":"en"). If the image is in another language, translate faithfully to English.');
+    } else if (langMode === 'hi') {
+        L.push('OUTPUT LANGUAGE: Hindi only ("language":"hi"). If the image is in another language, translate faithfully to Hindi. Explanation in Hindi.');
+    } else if (langMode === 'bilingual') {
+        L.push('OUTPUT: BILINGUAL. Fill the base fields in ENGLISH and the _hi fields in HINDI ("language":"bilingual"). If the image contains both languages, transcribe each side from the image; otherwise translate faithfully for the missing side. Explanations in their own language.');
+    } else {
+        L.push('OUTPUT LANGUAGE: Auto-detect from the image. If the question is in Hindi, output everything in Hindi with "language":"hi"; if English, "language":"en". If BOTH languages are printed, fill base fields in English, _hi fields in Hindi, "language":"bilingual".');
+    }
+    L.push('');
+    L.push('Respond with ONLY a single JSON object (no markdown fences):');
+    L.push('{');
+    L.push('  "language": "en" | "hi" | "bilingual",');
+    L.push('  "question_html": "<question text as HTML>",');
+    L.push('  "options": ["option 1", "option 2", ...],');
+    L.push('  "correct_index": <0-based integer>,');
+    L.push('  "confidence": "high" | "medium" | "low",');
+    L.push('  "note": "<1-2 sentences: anything uncertain — unreadable text, figure present, answer solved (not printed), etc. Empty string if nothing.>",');
+    L.push('  "explanation_html": "<explanation HTML>",');
+    L.push('  "question_html_hi": "<Hindi question HTML — ONLY for bilingual>",');
+    L.push('  "options_hi": ["..."],');
+    L.push('  "explanation_html_hi": "<Hindi explanation HTML — ONLY for bilingual>"');
+    L.push('}');
+    return L.join('\n');
+}
+
+async function qxExtract() {
+    if (qxState.busy) return;
+    if (!aiConfigured()) {
+        showToast('Gemini not configured',
+            'Open "AI Question Update (Gemini API)" settings in the Question Editor tab and save your API key first.', 'error');
+        return;
+    }
+    const crop = qxGetCropCanvas();
+    if (!crop) return;
+
+    // API image (bounded size) + small thumbnail for the bank record.
+    const apiCanvas = qxScaleCanvas(crop, 1600);
+    const b64 = apiCanvas.toDataURL('image/webp', 0.92).split(',')[1];
+    qxState.cropThumb = qxScaleCanvas(crop, 300).toDataURL('image/jpeg', 0.7);
+
+    const langMode = (document.getElementById('qx-lang') || {}).value || 'auto';
+
+    qxState.busy = true;
+    const btn = document.getElementById('qx-extract-btn');
+    const label = document.getElementById('qx-extract-label');
+    if (btn) btn.disabled = true;
+    if (label) label.textContent = 'Extracting with AI…';
+
+    try {
+        const raw = await aiGeminiRequest(qxBuildPrompt(langMode), { imageB64: b64, imageMime: 'image/webp' });
+        const p = aiParseJson(raw);
+
+        if (typeof p.question_html !== 'string' || !p.question_html.trim()) throw new Error('AI returned no question text.');
+        if (!Array.isArray(p.options) || p.options.length < 2) throw new Error('AI returned fewer than 2 options.');
+        let ci = parseInt(p.correct_index);
+        if (isNaN(ci) || ci < 0 || ci >= p.options.length) ci = 0;
+
+        const isBi = p.language === 'bilingual' && Array.isArray(p.options_hi) && p.options_hi.length;
+        qxState.result = {
+            language: (p.language === 'hi' || p.language === 'bilingual') ? p.language : 'en',
+            question: String(p.question_html),
+            options: p.options.map(o => String(o == null ? '' : o)),
+            correct: ci,
+            confidence: /^(high|medium|low)$/i.test(p.confidence || '') ? p.confidence.toLowerCase() : 'medium',
+            note: String(p.note || '').trim(),
+            explanation: String(p.explanation_html || ''),
+            hi: isBi ? {
+                question: String(p.question_html_hi || ''),
+                options: p.options_hi.map(o => String(o == null ? '' : o)),
+                explanation: String(p.explanation_html_hi || ''),
+            } : null,
+        };
+        qxRenderReview();
+        showToast('Question extracted', 'Review the fields below, edit if needed, then Save to Question Bank.', 'success');
+    } catch (err) {
+        showToast('Extraction failed', aiFriendlyError(err), 'error');
+    } finally {
+        qxState.busy = false;
+        if (btn) btn.disabled = false;
+        if (label) label.textContent = 'Extract Question with AI';
+    }
+}
+
+// ---------- review UI ----------
+function qxEsc(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function qxFieldsHtml(prefix, data, heading) {
+    let opts = '';
+    data.options.forEach((o, i) => {
+        const letter = OPTION_LETTERS[i] || String(i + 1);
+        opts += `
+        <div class="qx-opt-row" data-prefix="${prefix}">
+            <label class="qx-opt-radio" title="Mark as the correct option">
+                <input type="radio" name="qx-correct-${prefix}" value="${i}" ${i === data.correct ? 'checked' : ''}>
+                <span>${letter}</span>
+            </label>
+            <input type="text" class="qx-opt-input" value="${qxEsc(o)}">
+            <button type="button" class="qx-opt-del" title="Remove this option"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
+        </div>`;
+    });
+    return `
+    ${heading ? `<p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">${heading}</p>` : ''}
+    <label class="qx-lbl">Question</label>
+    <textarea id="qx-${prefix}-question" class="qx-ta" rows="3">${qxEsc(data.question)}</textarea>
+    <label class="qx-lbl mt-3">Options <span class="font-normal normal-case text-gray-400">(radio = correct answer)</span></label>
+    <div id="qx-${prefix}-opts">${opts}</div>
+    <button type="button" class="qx-add-opt" data-prefix="${prefix}"><i data-lucide="plus" class="w-3.5 h-3.5"></i> Add option</button>
+    <label class="qx-lbl mt-3">Explanation</label>
+    <textarea id="qx-${prefix}-explanation" class="qx-ta" rows="4">${qxEsc(data.explanation)}</textarea>`;
+}
+
+function qxRenderReview() {
+    const r = qxState.result;
+    if (!r) return;
+    const review = document.getElementById('qx-review');
+    const fields = document.getElementById('qx-fields');
+    const fieldsHi = document.getElementById('qx-fields-hi');
+    const thumb = document.getElementById('qx-crop-thumb');
+    const note = document.getElementById('qx-ai-note');
+    const conf = document.getElementById('qx-confidence');
+
+    if (thumb) thumb.src = qxState.cropThumb || '';
+    if (note) note.textContent = r.note ? `AI note: ${r.note}` : '';
+    if (conf) {
+        conf.textContent = `${r.confidence} confidence · ${r.language === 'bilingual' ? 'EN + HI' : r.language.toUpperCase()}`;
+        conf.classList.toggle('on', r.confidence === 'high');
+        conf.classList.toggle('off', r.confidence !== 'high');
+    }
+
+    fields.innerHTML = qxFieldsHtml('en', { question: r.question, options: r.options, correct: r.correct, explanation: r.explanation },
+        r.hi ? 'English' : '');
+    if (r.hi) {
+        fieldsHi.classList.remove('hidden');
+        fieldsHi.innerHTML = qxFieldsHtml('hi', { question: r.hi.question, options: r.hi.options, correct: r.correct, explanation: r.hi.explanation }, 'हिन्दी (Hindi)');
+    } else {
+        fieldsHi.classList.add('hidden');
+        fieldsHi.innerHTML = '';
+    }
+
+    // Wire option add/remove (delegated per render).
+    review.querySelectorAll('.qx-add-opt').forEach(b => b.addEventListener('click', () => {
+        const prefix = b.getAttribute('data-prefix');
+        const wrap = document.getElementById(`qx-${prefix}-opts`);
+        const i = wrap.querySelectorAll('.qx-opt-row').length;
+        const letter = OPTION_LETTERS[i] || String(i + 1);
+        const div = document.createElement('div');
+        div.className = 'qx-opt-row';
+        div.setAttribute('data-prefix', prefix);
+        div.innerHTML = `
+            <label class="qx-opt-radio"><input type="radio" name="qx-correct-${prefix}" value="${i}"><span>${letter}</span></label>
+            <input type="text" class="qx-opt-input" value="">
+            <button type="button" class="qx-opt-del"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>`;
+        wrap.appendChild(div);
+        div.querySelector('.qx-opt-del').addEventListener('click', () => { div.remove(); });
+        lucide.createIcons();
+    }));
+    review.querySelectorAll('.qx-opt-del').forEach(b => b.addEventListener('click', () => {
+        b.closest('.qx-opt-row').remove();
+    }));
+
+    review.classList.remove('hidden');
+    lucide.createIcons();
+    review.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function qxCollectFields(prefix) {
+    const qEl = document.getElementById(`qx-${prefix}-question`);
+    if (!qEl) return null;
+    const rows = document.querySelectorAll(`#qx-${prefix}-opts .qx-opt-row`);
+    const options = [];
+    let correct = 0;
+    rows.forEach((row, i) => {
+        options.push(row.querySelector('.qx-opt-input').value.trim());
+        if (row.querySelector('input[type=radio]').checked) correct = i;
+    });
+    return {
+        question: qEl.value.trim(),
+        options,
+        correct,
+        explanation: (document.getElementById(`qx-${prefix}-explanation`) || {}).value || '',
+    };
+}
+
+// ---------- save / bank ----------
+function qxPad(n) { return String(n).padStart(2, '0'); }
+function qxNowStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${qxPad(d.getMonth() + 1)}-${qxPad(d.getDate())} ${qxPad(d.getHours())}:${qxPad(d.getMinutes())}:${qxPad(d.getSeconds())}`;
+}
+
+async function qxSaveToBank() {
+    const r = qxState.result;
+    if (!r) return;
+    const en = qxCollectFields('en');
+    if (!en || !en.question) { showToast('Question empty', 'The question text cannot be empty.', 'error'); return; }
+    const cleanOpts = en.options.filter(o => o !== '');
+    if (cleanOpts.length < 2) { showToast('Options missing', 'At least 2 non-empty options are required.', 'error'); return; }
+    if (en.correct >= en.options.length || en.options[en.correct] === '') en.correct = en.options.findIndex(o => o !== '');
+
+    const isHiOnly = r.language === 'hi' && !r.hi;
+    const hi = r.hi ? qxCollectFields('hi') : null;
+
+    const meta = {
+        _aimcq_options: en.options.filter(o => o !== '').map(t => ({ text: t, image: '' })),
+        _aimcq_correct_answers: [Math.max(0, en.options.filter((o, i) => o !== '' && i <= en.correct).length - 1)],
+        _aimcq_explanation: en.explanation,
+    };
+    if (hi && hi.question) {
+        meta._aimcq_title_hi = stripHtmlTags(hi.question).slice(0, 120);
+        meta._aimcq_question_content_hi = hi.question;
+        meta._aimcq_options_hi = hi.options.filter(o => o !== '').map(t => ({ text: t, image: '' }));
+        meta._aimcq_explanation_hi = hi.explanation;
+    }
+
+    const id = Date.now();
+    const post = {
+        id,
+        post_author: 1,
+        post_date: qxNowStr(),
+        post_title: stripHtmlTags(en.question).slice(0, 120) || 'Extracted question',
+        post_content: en.question,
+        post_status: 'publish',
+        post_type: 'question',
+        meta_input: meta,
+        taxonomies: {},
+        embedded_media: [],
+    };
+
+    try {
+        await qxDbPut({
+            id,
+            created: new Date().toISOString(),
+            language: isHiOnly ? 'hi' : (hi ? 'bilingual' : r.language),
+            thumb: qxState.cropThumb || '',
+            post,
+        });
+    } catch (err) {
+        showToast('Save failed', 'IndexedDB error: ' + (err.message || err), 'error');
+        return;
+    }
+
+    qxState.result = null;
+    document.getElementById('qx-review').classList.add('hidden');
+    await qxRenderBank();
+    showToast('Saved to Question Bank', 'Stored locally — crop the next question to continue.', 'success');
+}
+
+async function qxRenderBank() {
+    const list = document.getElementById('qx-bank-list');
+    const countChip = document.getElementById('qx-bank-count');
+    if (!list) return;
+    let recs = [];
+    try { recs = await qxDbAll(); } catch (e) {}
+    recs.sort((a, b) => (a.id || 0) - (b.id || 0));
+
+    if (countChip) {
+        countChip.textContent = `${recs.length} question${recs.length === 1 ? '' : 's'}`;
+        countChip.classList.toggle('on', recs.length > 0);
+        countChip.classList.toggle('off', recs.length === 0);
+    }
+
+    if (!recs.length) {
+        list.innerHTML = '<p class="text-sm text-gray-400 px-4 py-6 text-center">No questions saved yet — crop &amp; extract your first question above.</p>';
+        return;
+    }
+
+    list.innerHTML = recs.map((rec, i) => {
+        const title = qxEsc(stripHtmlTags((rec.post && rec.post.post_title) || '').slice(0, 90));
+        const langBadge = rec.language === 'bilingual' ? 'EN+HI' : (rec.language || 'en').toUpperCase();
+        const date = rec.created ? new Date(rec.created).toLocaleString() : '';
+        return `
+        <div class="qx-bank-row" data-id="${rec.id}">
+            ${rec.thumb ? `<img src="${rec.thumb}" class="qx-bank-thumb" alt="">` : '<div class="qx-bank-thumb qx-bank-thumb-empty"><i data-lucide="file-question" class="w-4 h-4"></i></div>'}
+            <div class="qx-bank-main">
+                <p class="qx-bank-title"><span class="qx-bank-num">${i + 1}.</span> ${title || '(untitled)'}</p>
+                <p class="qx-bank-sub">${langBadge} · ${(rec.post && rec.post.meta_input && rec.post.meta_input._aimcq_options || []).length} options · ${qxEsc(date)}</p>
+            </div>
+            <button type="button" class="qx-bank-del" data-id="${rec.id}" title="Delete this question from the bank">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            </button>
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('.qx-bank-del').forEach(b => b.addEventListener('click', async () => {
+        const id = parseInt(b.getAttribute('data-id'), 10);
+        if (!window.confirm('Delete this question from the Question Bank? This cannot be undone.')) return;
+        try { await qxDbDelete(id); } catch (e) {}
+        qxRenderBank();
+    }));
+    lucide.createIcons();
+}
+
+async function qxExportBank() {
+    let recs = [];
+    try { recs = await qxDbAll(); } catch (e) {}
+    if (!recs.length) { showToast('Bank empty', 'Save at least one question before exporting.', 'error'); return; }
+    recs.sort((a, b) => (a.id || 0) - (b.id || 0));
+    const data = {
+        version: '1.8.0',
+        export_type: 'question_bank',
+        terms: [],
+        posts: recs.map(r => r.post),
+    };
+    downloadJSON(data, `question_bank_${Date.now()}.json`);
+    showToast('Exported', `${recs.length} questions exported in standard question JSON format.`, 'success');
+}
+
+// ---------- boot / wiring ----------
+(function qxBoot() {
+    function wire() {
+        const pdfIn = document.getElementById('qx-pdf-file');
+        const imgIn = document.getElementById('qx-img-file');
+        if (!pdfIn) return;   // markup not present
+
+        pdfIn.addEventListener('change', e => {
+            const f = e.target.files[0];
+            if (!f) return;
+            if (f.type !== 'application/pdf') { showToast('Not a PDF', 'Choose a .pdf file.', 'error'); return; }
+            qxLoadPdfFile(f);
+            pdfIn.value = '';
+        });
+        imgIn.addEventListener('change', e => {
+            const f = e.target.files[0];
+            if (!f) return;
+            qxShowWorkspace();
+            qxRenderImage(f);
+            imgIn.value = '';
+        });
+
+        document.getElementById('qx-prev-page').addEventListener('click', () => {
+            if (qxState.pageNum > 1) { qxState.pageNum--; qxQueuePage(qxState.pageNum); }
+        });
+        document.getElementById('qx-next-page').addEventListener('click', () => {
+            if (qxState.pdfDoc && qxState.pageNum < qxState.pdfDoc.numPages) {
+                qxState.pageNum++; qxQueuePage(qxState.pageNum);
+            }
+        });
+        document.getElementById('qx-zoom-in').addEventListener('click', () => { qxState.scale = Math.min(qxState.scale + 0.25, 6); qxApplyZoom(); });
+        document.getElementById('qx-zoom-out').addEventListener('click', () => { qxState.scale = Math.max(qxState.scale - 0.25, 0.25); qxApplyZoom(); });
+        document.getElementById('qx-zoom-reset').addEventListener('click', () => { qxState.scale = 1; qxApplyZoom(); });
+        document.getElementById('qx-change-file').addEventListener('click', () => {
+            if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
+            qxState.pdfDoc = null; qxState.srcType = '';
+            document.getElementById('qx-workspace').classList.add('hidden');
+            document.getElementById('qx-source-pick').classList.remove('hidden');
+        });
+
+        document.getElementById('qx-extract-btn').addEventListener('click', qxExtract);
+        document.getElementById('qx-save-btn').addEventListener('click', qxSaveToBank);
+        document.getElementById('qx-discard-btn').addEventListener('click', () => {
+            qxState.result = null;
+            document.getElementById('qx-review').classList.add('hidden');
+        });
+        document.getElementById('qx-export-btn').addEventListener('click', qxExportBank);
+        document.getElementById('qx-clear-btn').addEventListener('click', async () => {
+            const recs = await qxDbAll().catch(() => []);
+            if (!recs.length) { showToast('Bank empty', 'Nothing to delete.', 'info'); return; }
+            if (!window.confirm(`Delete ALL ${recs.length} questions from the Question Bank? This cannot be undone.`)) return;
+            try { await qxDbClear(); } catch (e) {}
+            qxRenderBank();
+            showToast('Question Bank cleared', 'All saved questions were deleted.', 'info');
+        });
+
+        qxRenderBank();          // restore persisted bank on load
+    }
+    function qxQueuePageDef() {}
+    window.qxQueuePage = function (num) {
+        if (qxState.rendering) qxState.pendingPage = num;
+        else qxRenderPdfPage(num);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
+    else wire();
+    setTimeout(() => { try { if (!document.getElementById('qx-bank-list').__wired) qxRenderBank(); } catch (e) {} }, 900);
 })();
