@@ -6429,7 +6429,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v1.7.0 (step-by-step math solution explanations — Question Editor AI analysis + Question Extractor) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v1.8.0 (Gemini split pipeline — Gemma vision + text-only Gemini generation to cut quota use) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -7044,6 +7044,14 @@ function qeAiApply(mode) {
             const customEl = document.getElementById('qx-vision-model-custom');
             if (customEl) customEl.classList.toggle('hidden', e.target.value !== 'custom');
         }
+        if (e.target && e.target.id === 'qx-gemini-split') {
+            qxPools.gemini.split = !!e.target.checked;
+            qxPoolPersist();
+            const visRow = document.getElementById('qx-vision-row');
+            if (visRow) visRow.classList.toggle('hidden',
+                !(qxPools.provider === 'deepseek' || (qxPools.provider === 'gemini' && qxPools.gemini.split)));
+            qxPoolUpdateChip();
+        }
     });
     // The tool's markup is injected after this script runs on some pages;
     // re-sync chips shortly after boot so the settings card reflects storage.
@@ -7462,7 +7470,8 @@ function qxBuildPrompt(langMode, transcript, wantSteps) {
     }
     L.push('');
     L.push('TRANSCRIPTION RULES:');
-    L.push(`- ${transcript ? 'Reconstruct the question text EXACTLY as transcribed (fix only obvious OCR-level artifacts)' : 'Transcribe the question text EXACTLY as printed (fix only obvious OCR-level artifacts)'}. Preserve line structure using <br> between lines/statements. Use minimal clean HTML (<b>, <i>, <br>, <sub>, <sup>).`);
+    L.push(`- ${transcript ? 'Reconstruct the question text EXACTLY as transcribed (fix only obvious OCR-level artifacts)' : 'Transcribe the question text EXACTLY as printed (fix only obvious OCR-level artifacts)'}. Use minimal clean HTML (<b>, <i>, <br>, <sub>, <sup>).`);
+    L.push('- LINE BREAKS (critical — do NOT copy the image\'s visual word-wrap): only insert a <br> where there is a genuine logical break — a new labeled statement/point (A./B./I./II./1./2. etc.), a distinct sentence that is clearly a separate line/point by the author\'s intent, or a real paragraph break. If a sentence merely wraps to the next visual line in the source because of column/page width, that is NOT a break — join the wrapped words back into ONE continuous line with a single space (do not insert <br>, and do not preserve a line break just because the source image had one there). When in doubt whether a break is logical or just word-wrap, prefer joining the text into one continuous line/sentence over inserting a <br>.');
     L.push('- Mathematical content must be written as LaTeX between $...$ delimiters.');
     L.push('- Do NOT include the question number prefix (e.g. "20.", "Q7)") in the question text.');
     L.push('- If the question contains a diagram/figure/graph, insert the placeholder [image here: <very short description>] at its exact position in the question text — do not try to describe the figure in full.');
@@ -7910,8 +7919,9 @@ const QX_VISION_MODEL_DEFAULT = 'gemma-4-31b-it';
 
 let qxPools = {
     provider: 'gemini',
-    gemini:   { model: 'gemini-2.5-flash', keys: [] },
-    deepseek: { model: 'deepseek-chat', keys: [], visionModel: QX_VISION_MODEL_DEFAULT },
+    visionModel: QX_VISION_MODEL_DEFAULT,   // shared image-reading model (Gemma by default)
+    gemini:   { model: 'gemini-2.5-flash', keys: [], split: true },
+    deepseek: { model: 'deepseek-chat', keys: [] },
 };
 // key: { id, label, key, disabledUntil }  — disabledUntil: epoch ms (0 = active)
 
@@ -7936,7 +7946,12 @@ function qxPoolLoad() {
                     qxPools[pr].model = src.model || QX_PROVIDERS[pr].defaultModel;
                     qxPools[pr].keys = qxNormKeys(src.keys);
                 });
-                qxPools.deepseek.visionModel = (p.deepseek && p.deepseek.visionModel) || QX_VISION_MODEL_DEFAULT;
+                // Shared vision model (migrates the old deepseek.visionModel slot).
+                qxPools.visionModel = p.visionModel
+                    || (p.deepseek && p.deepseek.visionModel)
+                    || QX_VISION_MODEL_DEFAULT;
+                // Gemini split pipeline (Gemma vision → Gemini text generation).
+                qxPools.gemini.split = (p.gemini && typeof p.gemini.split === 'boolean') ? p.gemini.split : true;
             }
         } else {
             // Migrate the old single-provider (Gemini) pool if present.
@@ -7999,7 +8014,13 @@ function qxPoolUpdateChip() {
     let text, on;
     if (!total) { text = `${prName} · not configured`; on = false; }
     else if (!active) { text = `${prName} · all ${total} keys limit-hit — auto-resets in 24h`; on = false; }
-    else { text = `${prName} · ${active}/${total} keys active · ${qxActivePool().model}`; on = true; }
+    else {
+        const modelInfo = (qxPools.provider === 'gemini' && qxPools.gemini.split)
+            ? `${qxPools.visionModel} → ${qxActivePool().model}`
+            : qxActivePool().model;
+        text = `${prName} · ${active}/${total} keys active · ${modelInfo}`;
+        on = true;
+    }
     chip.textContent = text;
     chip.classList.toggle('on', on);
     chip.classList.toggle('off', !on);
@@ -8025,14 +8046,21 @@ function qxPoolRenderKeys() {
             ? pool.model : QX_PROVIDERS[provider].defaultModel;
     }
 
-    // DeepSeek pipeline note + vision-model selector
+    // DeepSeek pipeline note, Gemini split toggle, shared vision-model row
     const dsNote = document.getElementById('qx-deepseek-note');
     if (dsNote) dsNote.classList.toggle('hidden', provider !== 'deepseek');
+    const splitRow = document.getElementById('qx-gemini-split-row');
+    const splitBox = document.getElementById('qx-gemini-split');
+    if (splitRow) splitRow.classList.toggle('hidden', provider !== 'gemini');
+    if (splitBox) splitBox.checked = !!qxPools.gemini.split;
+    const visRow = document.getElementById('qx-vision-row');
+    const showVision = provider === 'deepseek' || (provider === 'gemini' && qxPools.gemini.split);
+    if (visRow) visRow.classList.toggle('hidden', !showVision);
     const visSel = document.getElementById('qx-vision-model');
     const visCustom = document.getElementById('qx-vision-model-custom');
     if (visSel) {
         visSel.innerHTML = QX_VISION_MODELS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
-        const vm = qxPools.deepseek.visionModel || QX_VISION_MODEL_DEFAULT;
+        const vm = qxPools.visionModel || QX_VISION_MODEL_DEFAULT;
         const known = QX_VISION_MODELS.some(m => m[0] === vm);
         visSel.value = known ? vm : 'custom';
         if (visCustom) {
@@ -8103,15 +8131,15 @@ function qxPoolSave() {
     const modelSel = document.getElementById('qx-model');
     const pool = qxActivePool();
     if (modelSel && modelSel.value) pool.model = modelSel.value;
-    if (qxPools.provider === 'deepseek' || true) {
-        const visSel = document.getElementById('qx-vision-model');
-        const visCustom = document.getElementById('qx-vision-model-custom');
-        if (visSel) {
-            qxPools.deepseek.visionModel = visSel.value === 'custom'
-                ? (visCustom && visCustom.value.trim()) || QX_VISION_MODEL_DEFAULT
-                : visSel.value;
-        }
+    const visSel = document.getElementById('qx-vision-model');
+    const visCustom = document.getElementById('qx-vision-model-custom');
+    if (visSel) {
+        qxPools.visionModel = visSel.value === 'custom'
+            ? (visCustom && visCustom.value.trim()) || QX_VISION_MODEL_DEFAULT
+            : visSel.value;
     }
+    const splitBox = document.getElementById('qx-gemini-split');
+    if (splitBox) qxPools.gemini.split = !!splitBox.checked;
     pool.keys = pool.keys.filter(k => k.key || k.label);
     qxPoolPersist();
     qxPoolRenderKeys();
@@ -8214,13 +8242,15 @@ async function qxAiCall(prompt, opts, provider) {
 // DeepSeek: (1) minimal Gemini transcription of the crop, (2) DeepSeek
 // receives the transcription and does structuring/solving/explanation.
 const QX_TRANSCRIBE_PROMPT =
-    'Transcribe ALL text visible in this image EXACTLY, preserving line breaks and reading order. ' +
+    'Transcribe ALL text visible in this image EXACTLY, in correct reading order. ' +
+    'CRITICAL — do NOT copy the image\'s visual word-wrap: if a sentence merely wraps to the next visual line because of column/page width, join the wrapped words back into ONE continuous line with a single space — do NOT start a new line there. ' +
+    'Only start a new line for a GENUINE logical break: a new labeled statement/point (A./B./I./II./1./2. etc.), a clearly separate sentence/point by the author\'s intent, or a real paragraph break. When unsure whether a break is logical or just visual wrapping, join the text into one continuous line instead of breaking it. ' +
     'Write mathematical content as LaTeX between $...$ delimiters. ' +
     'If a diagram/figure/graph appears, write [image here: <very short description>] at its position. ' +
     'Include any printed answer marking. Output ONLY the raw transcription — no commentary.';
 
 async function qxGeminiTranscribe(imageB64) {
-    const visionModel = qxPools.deepseek.visionModel || QX_VISION_MODEL_DEFAULT;
+    const visionModel = qxPools.visionModel || QX_VISION_MODEL_DEFAULT;
     // Prefer the extractor's Gemini pool (with failover); fall back to the
     // Question Editor's Gemini key if the pool is empty. Always uses the
     // dedicated vision model (default: gemma-4-31b-it) — independent of
@@ -8239,13 +8269,36 @@ async function qxGeminiTranscribe(imageB64) {
 }
 
 async function qxRunExtraction(buildPrompt, langMode, imageB64, wantSteps) {
+    const label = document.getElementById('qx-extract-label');
     if (qxPools.provider === 'deepseek') {
-        const label = document.getElementById('qx-extract-label');
-        if (label) label.textContent = 'Reading image (Gemini)…';
+        if (label) label.textContent = 'Reading image (vision model)…';
         const transcript = await qxGeminiTranscribe(imageB64);
         if (!transcript || !transcript.trim()) throw new Error('Image transcription came back empty — try a tighter, clearer crop.');
         if (label) label.textContent = 'Structuring with DeepSeek…';
         return qxAiCall(buildPrompt(langMode, transcript.trim(), wantSteps), {}, 'deepseek');
+    }
+    // Gemini provider — split pipeline saves the generation model's vision
+    // quota: cheap vision model (Gemma) reads the image, then the selected
+    // Gemini model runs TEXT-ONLY for the actual question generation.
+    if (qxPools.gemini.split) {
+        try {
+            if (label) label.textContent = `Reading image (${qxPools.visionModel})…`;
+            const transcript = await qxGeminiTranscribe(imageB64);
+            if (!transcript || !transcript.trim()) throw new Error('Image transcription came back empty — try a tighter, clearer crop.');
+            if (label) label.textContent = `Generating (${qxPools.gemini.model})…`;
+            return await qxAiCall(buildPrompt(langMode, transcript.trim(), wantSteps), {}, 'gemini');
+        } catch (err) {
+            // Vision model missing/unavailable → fall back to the direct
+            // multimodal call so extraction still works.
+            if (err && (err.status === 404 || /not found|is not supported|does not support/i.test(err.message || ''))) {
+                showToast('Vision model unavailable — using direct call',
+                    `"${qxPools.visionModel}" was rejected by the API (${err.message || 'not found'}). Falling back to a single multimodal ${qxPools.gemini.model} call. Fix the vision model id in the Extractor API Settings.`,
+                    'info');
+                if (label) label.textContent = 'Extracting with AI…';
+                return qxAiCall(buildPrompt(langMode, undefined, wantSteps), { imageB64, imageMime: 'image/webp' }, 'gemini');
+            }
+            throw err;
+        }
     }
     return qxAiCall(buildPrompt(langMode, undefined, wantSteps), { imageB64, imageMime: 'image/webp' }, 'gemini');
 }
