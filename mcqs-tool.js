@@ -780,19 +780,30 @@
                             <i data-lucide="timer-reset" class="w-3.5 h-3.5"></i> Reset all limits
                         </button>
                     </div>
-                    <div id="qx-deepseek-note" class="hidden text-[11px] font-medium text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 leading-relaxed space-y-2">
+                    <div id="qx-gemini-split-row" class="hidden text-[11px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 leading-relaxed">
+                        <label class="flex items-start gap-2 cursor-pointer">
+                            <input type="checkbox" id="qx-gemini-split" class="accent-emerald-600 mt-0.5">
+                            <span><b>Split pipeline — save Gemini quota:</b> read the image with the cheap <b>vision model</b> below
+                            (Gemma has its own separate free quota), then run the selected Gemini model above <b>text-only</b> for the
+                            actual question generation. Off = single multimodal call with the Gemini model (uses its vision quota).
+                            If the vision model is unavailable, extraction automatically falls back to the direct call.</span>
+                        </label>
+                    </div>
+                    <div id="qx-deepseek-note" class="hidden text-[11px] font-medium text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 leading-relaxed">
                         <p><b>How DeepSeek mode works:</b> DeepSeek's API cannot read images, so the crop is first
-                        <b>transcribed by a vision model via the Gemini API</b> (from your Gemini pool here, or the Question Editor's
+                        <b>transcribed by the vision model below via the Gemini API</b> (using your Gemini pool keys, or the Question Editor's
                         key as fallback) with a minimal low-token prompt — then <b>DeepSeek does all the heavy work</b> (structuring,
                         solving, explanation). This keeps most of the token usage on your DeepSeek limits. Keep at least one Gemini key configured.</p>
+                    </div>
+                    <div id="qx-vision-row" class="hidden text-[11px] bg-white border border-gray-200 rounded-lg px-3 py-2">
                         <div class="flex items-center gap-2 flex-wrap">
-                            <label class="text-[11px] font-bold text-sky-700 uppercase tracking-wider whitespace-nowrap">Vision model (transcription step)</label>
-                            <select id="qx-vision-model" class="text-xs border border-sky-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-sky-400">
-                                <!-- options rendered by JS -->
-                            </select>
-                            <input type="text" id="qx-vision-model-custom" placeholder="e.g. gemma-3-27b-it"
-                                   class="hidden text-xs border border-sky-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-sky-400">
-                            <span class="text-sky-500">Uses Gemini pool keys — separate free quota from your chosen Gemini extraction model.</span>
+                        <label class="text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Vision model (image-reading step)</label>
+                        <select id="qx-vision-model" class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-rose-400">
+                            <!-- options rendered by JS -->
+                        </select>
+                        <input type="text" id="qx-vision-model-custom" placeholder="e.g. gemma-3-27b-it"
+                               class="hidden text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-rose-400">
+                        <span class="text-gray-400">Called via the Gemini API with your Gemini pool keys — its quota is separate from the generation model's.</span>
                         </div>
                     </div>
                     <div id="qx-keys-list" class="space-y-2"><!-- key rows rendered by JS --></div>
