@@ -887,6 +887,14 @@
                         <input type="checkbox" id="qx-steps" checked class="accent-rose-600">
                         <i data-lucide="list-ordered" class="w-3.5 h-3.5 text-rose-500"></i> Step-by-step math
                     </label>
+                    <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 flex-shrink-0" title="How thorough the generated explanation should be">
+                        <label class="text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Explanation</label>
+                        <select id="qx-detail" class="text-sm border-0 bg-transparent py-2 focus:outline-none">
+                            <option value="detailed" selected>Detailed (for weak students)</option>
+                            <option value="standard">Standard</option>
+                            <option value="concise">Concise</option>
+                        </select>
+                    </div>
                     <button id="qx-extract-btn" class="flex-1 min-w-[220px] bg-rose-600 hover:bg-rose-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold py-2.5 px-5 rounded-xl text-sm flex items-center justify-center gap-2 transition-colors shadow-sm">
                         <i data-lucide="sparkles" class="w-4 h-4"></i> <span id="qx-extract-label">Extract Question with AI</span>
                     </button>
@@ -1273,6 +1281,14 @@
                         <input type="checkbox" id="qe-ai-steps" checked class="accent-violet-600">
                         <i data-lucide="list-ordered" class="w-3.5 h-3.5 text-violet-500"></i> Step-by-step math
                     </label>
+                    <div class="flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg px-3 py-2 flex-shrink-0" title="How thorough the generated explanation should be">
+                        <i data-lucide="book-open" class="w-3.5 h-3.5 text-violet-500"></i>
+                        <select id="qe-ai-detail" class="bg-transparent border-0 focus:outline-none text-xs font-semibold text-gray-600">
+                            <option value="detailed" selected>Detailed</option>
+                            <option value="standard">Standard</option>
+                            <option value="concise">Concise</option>
+                        </select>
+                    </div>
                     <button type="button" id="qe-ai-analyze-btn" onclick="qeAiAnalyze()"
                             class="bg-violet-600 hover:bg-violet-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-bold py-2 px-4 rounded-lg transition-colors flex items-center gap-2 shadow-sm flex-shrink-0">
                         <i data-lucide="scan-search" class="w-4 h-4"></i>
