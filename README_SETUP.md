@@ -54,6 +54,36 @@ Replace `USER`, `REPO`, and `v1.0` with your own. You only ever hard-code this
 
 ---
 
+## Question Extractor (AI — Gemini)
+
+A dedicated **Question Extractor** tab builds a question bank straight from
+exam papers. Workflow:
+
+1. **Load** a PDF (any page count, rendered at high fidelity) or an image
+   (screenshot/photo of the paper). Same viewer as the Figure Updater —
+   page navigation and zoom included; crop mode is always on.
+2. **Crop one full question** (statement + options), Google-Lens style.
+3. **Extract Question with AI** sends the crop to Gemini (uses the same API
+   key configured in the Question Editor tab's AI settings). The AI
+   transcribes the question and options exactly (LaTeX as `$...$`,
+   `[image here: ...]` placeholders for embedded diagrams — ready for the
+   Figure Updater later), solves it if the paper doesn't mark the answer,
+   and drafts an explanation (no option-letter references). Output language
+   is selectable: Auto-detect / English / Hindi / Bilingual (EN + HI).
+4. **Review & edit** every field — question, options (add/remove, pick the
+   correct one), explanation, Hindi side for bilingual — then
+   **Save to Question Bank**.
+5. Repeat for each question. The bank is stored in the browser's
+   **IndexedDB**: it survives refresh and browser close, and entries are
+   removed only via the per-question Delete button (or Delete All, both
+   with confirmation).
+6. **Export JSON** downloads the whole bank in the standard question JSON
+   format (`posts` with `_aimcq_options`, `_aimcq_correct_answers`,
+   `_aimcq_explanation`, plus `_hi` fields for bilingual) — directly usable
+   in the Question Editor, Quiz Builder, and Figure Updater tabs.
+
+---
+
 ## Figure position — place figures anywhere in the question
 
 Exam papers often show the diagram *between* the question's lines (e.g. after
