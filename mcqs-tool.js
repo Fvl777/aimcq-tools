@@ -780,11 +780,20 @@
                             <i data-lucide="timer-reset" class="w-3.5 h-3.5"></i> Reset all limits
                         </button>
                     </div>
-                    <div id="qx-deepseek-note" class="hidden text-[11px] font-medium text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 leading-relaxed">
-                        <b>How DeepSeek mode works:</b> DeepSeek's API cannot read images, so the crop is first
-                        <b>transcribed by a Gemini key</b> (from your Gemini pool here, or the Question Editor's key as fallback)
-                        with a minimal low-token prompt — then <b>DeepSeek does all the heavy work</b> (structuring, solving,
-                        explanation). This keeps most of the token usage on your DeepSeek limits. Keep at least one Gemini key configured.
+                    <div id="qx-deepseek-note" class="hidden text-[11px] font-medium text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 leading-relaxed space-y-2">
+                        <p><b>How DeepSeek mode works:</b> DeepSeek's API cannot read images, so the crop is first
+                        <b>transcribed by a vision model via the Gemini API</b> (from your Gemini pool here, or the Question Editor's
+                        key as fallback) with a minimal low-token prompt — then <b>DeepSeek does all the heavy work</b> (structuring,
+                        solving, explanation). This keeps most of the token usage on your DeepSeek limits. Keep at least one Gemini key configured.</p>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <label class="text-[11px] font-bold text-sky-700 uppercase tracking-wider whitespace-nowrap">Vision model (transcription step)</label>
+                            <select id="qx-vision-model" class="text-xs border border-sky-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-sky-400">
+                                <!-- options rendered by JS -->
+                            </select>
+                            <input type="text" id="qx-vision-model-custom" placeholder="e.g. gemma-3-27b-it"
+                                   class="hidden text-xs border border-sky-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-sky-400">
+                            <span class="text-sky-500">Uses Gemini pool keys — separate free quota from your chosen Gemini extraction model.</span>
+                        </div>
                     </div>
                     <div id="qx-keys-list" class="space-y-2"><!-- key rows rendered by JS --></div>
                     <p class="text-[11px] text-gray-400 leading-relaxed" id="qx-pool-hint">
