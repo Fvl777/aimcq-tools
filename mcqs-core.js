@@ -6429,7 +6429,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v1.6.0 (extractor: Gemini + DeepSeek provider switch, per-provider key pools) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v1.6.1 (Gemini auth via header, key sanitation, precise key-error diagnosis + per-key Test) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -6523,7 +6523,7 @@ function aiReadSettingsForm() {
     const keyEl = document.getElementById('ai-api-key');
     const modelEl = document.getElementById('ai-model');
     const customEl = document.getElementById('ai-model-custom');
-    const key = keyEl ? keyEl.value.trim() : '';
+    const key = keyEl ? aiSanitizeKey(keyEl.value) : '';
     let model = modelEl ? modelEl.value : 'gemini-2.5-flash';
     if (model === 'custom') model = (customEl && customEl.value.trim()) || 'gemini-2.5-flash';
     return { key, model };
@@ -6582,11 +6582,19 @@ async function aiTestConnection() {
 }
 
 // ---------- Gemini transport ----------
+// Strip characters that commonly sneak into pasted keys (quotes, spaces,
+// newlines, zero-width chars) — a top cause of "invalid/rejected key" errors.
+function aiSanitizeKey(k) {
+    return String(k || '').replace(/["'`\u200B-\u200D\uFEFF]/g, '').replace(/\s+/g, '');
+}
+
 async function aiGeminiRequest(prompt, opts) {
     opts = opts || {};
-    const key = opts.key || aiCfg.key;
+    const key = aiSanitizeKey(opts.key || aiCfg.key);
     const model = opts.model || aiEffectiveModel();
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+    // Auth via the x-goog-api-key header (Google's recommended method) —
+    // avoids query-param edge cases and keeps the key out of URLs/logs.
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 
     // Multimodal support: opts.imageB64 (+ opts.imageMime) attaches an image
     // part before the text prompt — used by the Question Extractor.
@@ -6605,15 +6613,30 @@ async function aiGeminiRequest(prompt, opts) {
 
     const resp = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': key,
+        },
         body: JSON.stringify(body)
     });
 
     if (!resp.ok) {
-        let detail = '';
-        try { const j = await resp.json(); detail = (j.error && j.error.message) || ''; } catch (e) {}
+        let detail = '', reason = '', gstatus = '';
+        try {
+            const j = await resp.json();
+            if (j.error) {
+                detail = j.error.message || '';
+                gstatus = j.error.status || '';
+                // details[].reason carries the precise cause, e.g.
+                // API_KEY_INVALID, SERVICE_DISABLED, API_KEY_HTTP_REFERRER_BLOCKED
+                (j.error.details || []).forEach(d => {
+                    if (d && d.reason && !reason) reason = d.reason;
+                });
+            }
+        } catch (e) {}
         const err = new Error(detail || `HTTP ${resp.status}`);
         err.status = resp.status;
+        err.reason = reason || gstatus;
         throw err;
     }
 
@@ -6643,10 +6666,29 @@ function aiParseJson(text) {
 
 function aiFriendlyError(err) {
     const msg = (err && err.message) || 'Unknown error';
-    if (err && err.status === 400 && /API key/i.test(msg)) return 'Invalid API key.';
-    if (err && (err.status === 401 || err.status === 403)) return 'API key rejected (check key / model access).';
+    const reason = (err && err.reason) || '';
+
+    // Targeted guidance based on Google's precise error reason.
+    if (/API_KEY_INVALID/i.test(reason) || (err && err.status === 400 && /API key/i.test(msg))) {
+        return 'This API key is invalid. Re-copy the FULL key from https://aistudio.google.com/app/apikey (watch for missing characters or extra spaces/quotes).';
+    }
+    if (/API_KEY_HTTP_REFERRER_BLOCKED|API_KEY_IP_ADDRESS_BLOCKED|API_KEY_ANDROID_APP_BLOCKED|API_KEY_IOS_APP_BLOCKED/i.test(reason)) {
+        return 'This key has application restrictions (website/IP/app) that block this page. In Google Cloud Console → APIs & Services → Credentials, open the key and set "Application restrictions" to "None" — or create an unrestricted key in AI Studio.';
+    }
+    if (/SERVICE_DISABLED/i.test(reason)) {
+        return 'The "Generative Language API" is disabled for this key\'s Google Cloud project. Enable it in Cloud Console, or simply create the key at https://aistudio.google.com/app/apikey (AI Studio keys work out of the box).';
+    }
+    if (/API_KEY_SERVICE_BLOCKED/i.test(reason)) {
+        return 'This key is not allowed to call the Generative Language API (API restrictions on the key). Edit the key\'s "API restrictions" to include the Generative Language API, or create a fresh key in AI Studio.';
+    }
+    if (err && (err.status === 401 || err.status === 403)) {
+        return 'API key rejected (HTTP ' + err.status + (reason ? ' · ' + reason : '') + '). Common causes for free-tier keys: (1) key created in Google Cloud without the Generative Language API enabled — create it at https://aistudio.google.com/app/apikey instead; (2) key has website/IP restrictions — set restrictions to "None"; (3) key was deleted/regenerated. Google says: ' + msg;
+    }
     if (err && err.status === 404) return 'Model not found — pick another model in AI settings.';
     if (err && err.status === 429) return 'Rate limit / quota exceeded — wait a moment and retry.';
+    if (/FAILED_PRECONDITION/i.test(reason) || /User location is not supported/i.test(msg)) {
+        return 'Google reports your region is not supported for the free Gemini API tier with this key. Google says: ' + msg;
+    }
     if (/Failed to fetch|NetworkError/i.test(msg)) return 'Network error — check your connection (or an ad-blocker blocking googleapis.com).';
     return msg;
 }
@@ -7973,6 +8015,7 @@ function qxPoolRenderKeys() {
                 : limited ? `limit hit · resets in ${qxFmtCooldown(k.disabledUntil)}`
                 : 'active'}</span>
             ${limited ? `<button type="button" class="qx-key-btn qx-key-react" data-id="${k.id}" title="Mark active again now"><i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i></button>` : ''}
+            ${k.key ? `<button type="button" class="qx-key-btn qx-key-test" data-id="${k.id}" title="Test this key with a tiny request"><i data-lucide="plug-zap" class="w-3.5 h-3.5"></i></button>` : ''}
             <button type="button" class="qx-key-btn qx-key-del" data-id="${k.id}" title="Remove this key"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
         </div>`;
     }).join('');
@@ -7981,7 +8024,9 @@ function qxPoolRenderKeys() {
         inp.addEventListener('input', () => {
             const row = inp.closest('.qx-key-row');
             const k = pool.keys.find(x => x.id === row.getAttribute('data-id'));
-            if (k) k[inp.getAttribute('data-field')] = inp.value.trim();
+            if (!k) return;
+            const field = inp.getAttribute('data-field');
+            k[field] = field === 'key' ? aiSanitizeKey(inp.value) : inp.value.trim();
         });
     });
     list.querySelectorAll('.qx-key-del').forEach(b => b.addEventListener('click', () => {
@@ -7993,6 +8038,9 @@ function qxPoolRenderKeys() {
     list.querySelectorAll('.qx-key-react').forEach(b => b.addEventListener('click', () => {
         const k = pool.keys.find(x => x.id === b.getAttribute('data-id'));
         if (k) { k.disabledUntil = 0; qxPoolPersist(); qxPoolRenderKeys(); qxPoolUpdateChip(); }
+    }));
+    list.querySelectorAll('.qx-key-test').forEach(b => b.addEventListener('click', () => {
+        qxPoolTestKey(b.getAttribute('data-id'), b);
     }));
     lucide.createIcons();
 }
@@ -8158,3 +8206,27 @@ async function qxRunExtraction(buildPrompt, langMode, imageB64) {
         } catch (e) {}
     }, 60000);
 })();
+
+// Test one pool key with a tiny request and show the PRECISE result —
+// so a bad key (restrictions, disabled API, typo) is easy to diagnose.
+async function qxPoolTestKey(id, btn) {
+    const pool = qxActivePool();
+    const k = pool.keys.find(x => x.id === id);
+    if (!k || !k.key) return;
+    const row = btn && btn.closest('.qx-key-row');
+    const statusEl = row && row.querySelector('.qx-key-status');
+    const prev = statusEl ? statusEl.textContent : '';
+    if (statusEl) { statusEl.textContent = 'testing…'; statusEl.className = 'qx-key-status'; }
+    try {
+        const opts = { key: k.key, model: pool.model, plainText: true };
+        const out = qxPools.provider === 'deepseek'
+            ? await aiDeepseekRequest('Reply with exactly: OK', opts)
+            : await aiGeminiRequest('Reply with exactly: OK', opts);
+        if (statusEl) { statusEl.textContent = /OK/i.test(out || '') ? '✓ works' : '✓ reachable'; statusEl.className = 'qx-key-status ok'; }
+        showToast('Key OK', `"${k.label}" works with ${pool.model}.`, 'success');
+    } catch (err) {
+        if (statusEl) { statusEl.textContent = '✗ failed'; statusEl.className = 'qx-key-status bad'; }
+        showToast(`Key "${k.label}" failed`, aiFriendlyError(err), 'error');
+    }
+    setTimeout(() => { try { qxPoolRenderKeys(); } catch (e) {} }, 4000);
+}
