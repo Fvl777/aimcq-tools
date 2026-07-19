@@ -1248,3 +1248,52 @@
     border-radius: 8px; padding: 7px; cursor: pointer; display: inline-flex;
 }
 .qx-bank-del:hover { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
+
+/* ===== Extractor API key pool ===== */
+.qx-key-row {
+    display: flex; align-items: center; gap: 7px;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 7px 9px;
+}
+.qx-key-row.limited { background: #fffbeb; border-color: #fde68a; }
+.qx-key-order {
+    width: 20px; height: 20px; border-radius: 50%; background: #fecdd3; color: #be123c;
+    font-size: 11px; font-weight: 800; display: inline-flex; align-items: center;
+    justify-content: center; flex-shrink: 0;
+}
+.qx-key-label {
+    width: 120px; flex-shrink: 0; font-size: 12px; font-weight: 600; color: #374151;
+    border: 1px solid #e5e7eb; border-radius: 7px; padding: 6px 8px; background: #f9fafb;
+}
+.qx-key-input {
+    flex: 1; min-width: 120px; font-size: 12px; color: #1f2937;
+    border: 1px solid #e5e7eb; border-radius: 7px; padding: 6px 8px; background: #fff;
+    font-family: ui-monospace, Menlo, monospace;
+}
+.qx-key-label:focus, .qx-key-input:focus { outline: none; box-shadow: 0 0 0 2px #fda4af; border-color: #fb7185; }
+.qx-key-status {
+    font-size: 10.5px; font-weight: 700; color: #9ca3af; white-space: nowrap; flex-shrink: 0;
+}
+.qx-key-status.ok { color: #059669; }
+.qx-key-status.bad { color: #b45309; }
+.qx-key-btn {
+    flex-shrink: 0; color: #9ca3af; border: 1px solid #e5e7eb; background: #fff;
+    border-radius: 7px; padding: 5px; cursor: pointer; display: inline-flex;
+}
+.qx-key-btn:hover { color: #374151; background: #f9fafb; }
+.qx-key-del:hover { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
+.qx-key-react { color: #059669; border-color: #a7f3d0; }
+.qx-key-react:hover { background: #ecfdf5; color: #047857; }
+
+/* ===== Provider switch (extractor API settings) ===== */
+.qx-provider-switch {
+    display: inline-flex; background: #fff; border: 1px solid #e5e7eb;
+    border-radius: 10px; padding: 3px; gap: 2px;
+}
+.qx-provider-switch button {
+    font-size: 12px; font-weight: 700; color: #6b7280;
+    padding: 6px 14px; border-radius: 8px; border: 0; background: transparent;
+    cursor: pointer; transition: all .15s;
+}
+.qx-provider-switch button:hover { color: #374151; }
+.qx-provider-switch button.active { background: #e11d48; color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
