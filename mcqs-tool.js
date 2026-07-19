@@ -744,26 +744,58 @@
         <!-- ==================== QUESTION EXTRACTOR TAB ==================== -->
         <div id="tab-extractor" class="hidden space-y-5">
 
-            <!-- AI status + output language -->
-            <div class="flex items-center justify-between gap-3 flex-wrap bg-white border border-rose-200 rounded-xl px-4 py-3 shadow-sm">
-                <div class="flex items-center gap-3 min-w-0">
+            <!-- Extractor API settings — separate free-tier Gemini key POOL -->
+            <div id="qx-api-card" class="bg-white border border-rose-200 rounded-xl overflow-hidden shadow-sm">
+                <button type="button" onclick="qxToggleApiSettings()" class="w-full flex items-center gap-3 px-4 py-3 hover:bg-rose-50/60 transition-colors text-left">
                     <span class="w-8 h-8 rounded-lg bg-rose-100 flex items-center justify-center flex-shrink-0">
-                        <i data-lucide="scan-text" class="w-4 h-4 text-rose-600"></i>
+                        <i data-lucide="key-round" class="w-4 h-4 text-rose-600"></i>
                     </span>
-                    <div class="min-w-0">
-                        <p class="text-sm font-bold text-gray-800">AI Question Extraction <span class="text-rose-500 font-semibold">(Gemini)</span></p>
-                        <p class="text-xs text-gray-400">Crop a question from a PDF/image — AI transcribes it into question, options &amp; explanation. Uses the Gemini key from the Question Editor tab's AI settings.</p>
+                    <span class="flex-1 min-w-0">
+                        <span class="block text-sm font-bold text-gray-800">Extractor API Settings <span class="text-rose-500 font-semibold">(Gemini / DeepSeek — Free-Tier Key Pools)</span></span>
+                        <span class="block text-xs text-gray-400">Separate from the Question Editor's key. Switch between Gemini and DeepSeek; each provider has its own multi-key pool (one key per account) — the extractor auto-switches to the next key when one hits its limit, and limits self-reset after 24 h.</span>
+                    </span>
+                    <span id="qx-ai-status" class="ai-status-chip off flex-shrink-0">Not configured</span>
+                    <i data-lucide="chevron-down" id="qx-api-chevron" class="w-4 h-4 text-gray-400 flex-shrink-0 transition-transform"></i>
+                </button>
+                <div id="qx-api-body" class="hidden border-t border-rose-100 px-4 py-4 space-y-3 bg-rose-50/40">
+                    <div class="flex items-end gap-3 flex-wrap">
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Provider</label>
+                            <div class="qx-provider-switch" id="qx-provider-switch">
+                                <button type="button" data-provider="gemini" onclick="qxSetProvider('gemini')">Gemini</button>
+                                <button type="button" data-provider="deepseek" onclick="qxSetProvider('deepseek')">DeepSeek</button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Model <span class="normal-case font-medium text-gray-400">(shared by this provider's keys)</span></label>
+                            <select id="qx-model" class="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-rose-400"></select>
+                        </div>
+                        <button type="button" onclick="qxPoolAddKey()" class="text-xs bg-white hover:bg-gray-50 text-rose-600 border border-dashed border-rose-300 font-bold py-2 px-3.5 rounded-lg transition-colors flex items-center gap-1.5">
+                            <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add API key
+                        </button>
+                        <button type="button" onclick="qxPoolSave()" class="text-xs bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center gap-1.5">
+                            <i data-lucide="save" class="w-3.5 h-3.5"></i> Save Pool
+                        </button>
+                        <button type="button" onclick="qxPoolResetLimits()" class="text-xs bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-semibold py-2 px-3.5 rounded-lg transition-colors flex items-center gap-1.5" title="Manually mark every key of this provider as active again">
+                            <i data-lucide="timer-reset" class="w-3.5 h-3.5"></i> Reset all limits
+                        </button>
                     </div>
-                </div>
-                <div class="flex items-center gap-2 flex-shrink-0">
-                    <label class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Output</label>
-                    <select id="qx-lang" class="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-rose-400">
-                        <option value="auto">Auto-detect language</option>
-                        <option value="en">English</option>
-                        <option value="hi">Hindi</option>
-                        <option value="bilingual">Bilingual (EN + HI)</option>
-                    </select>
-                    <span id="qx-ai-status" class="ai-status-chip off">Not configured</span>
+                    <div id="qx-deepseek-note" class="hidden text-[11px] font-medium text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 leading-relaxed">
+                        <b>How DeepSeek mode works:</b> DeepSeek's API cannot read images, so the crop is first
+                        <b>transcribed by a Gemini key</b> (from your Gemini pool here, or the Question Editor's key as fallback)
+                        with a minimal low-token prompt — then <b>DeepSeek does all the heavy work</b> (structuring, solving,
+                        explanation). This keeps most of the token usage on your DeepSeek limits. Keep at least one Gemini key configured.
+                    </div>
+                    <div id="qx-keys-list" class="space-y-2"><!-- key rows rendered by JS --></div>
+                    <p class="text-[11px] text-gray-400 leading-relaxed" id="qx-pool-hint">
+                        Keys are tried <b>in order</b>. When a request returns a quota/limit error, that key is
+                        automatically <b>deactivated for 24 hours</b> (daily reset window) and the call retries
+                        with the next active key — repeating till the last key. Deactivated keys re-activate automatically after
+                        24 h, or instantly via their <b>Reactivate</b> button. Each provider keeps its own key pool &amp; limits.
+                        Stored only in this browser (localStorage). Free Gemini keys:
+                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener" class="text-rose-600 underline">aistudio.google.com</a> ·
+                        DeepSeek keys: <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" class="text-rose-600 underline">platform.deepseek.com</a>.
+                    </p>
                 </div>
             </div>
 
@@ -819,9 +851,20 @@
                         Crop mode is always <b>on</b> — drag a box around one complete question (statement + options), then click <b>Extract Question with AI</b>.
                     </p>
                 </div>
-                <button id="qx-extract-btn" class="w-full bg-rose-600 hover:bg-rose-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold py-2.5 px-5 rounded-xl text-sm flex items-center justify-center gap-2 transition-colors shadow-sm">
-                    <i data-lucide="sparkles" class="w-4 h-4"></i> <span id="qx-extract-label">Extract Question with AI</span>
-                </button>
+                <div class="flex items-stretch gap-2 flex-wrap">
+                    <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 flex-shrink-0">
+                        <label class="text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Output</label>
+                        <select id="qx-lang" class="text-sm border-0 bg-transparent py-2 focus:outline-none">
+                            <option value="auto">Auto-detect language</option>
+                            <option value="en">English</option>
+                            <option value="hi">Hindi</option>
+                            <option value="bilingual">Bilingual (EN + HI)</option>
+                        </select>
+                    </div>
+                    <button id="qx-extract-btn" class="flex-1 min-w-[220px] bg-rose-600 hover:bg-rose-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold py-2.5 px-5 rounded-xl text-sm flex items-center justify-center gap-2 transition-colors shadow-sm">
+                        <i data-lucide="sparkles" class="w-4 h-4"></i> <span id="qx-extract-label">Extract Question with AI</span>
+                    </button>
+                </div>
             </div>
 
             <!-- Step 3: Review -->
