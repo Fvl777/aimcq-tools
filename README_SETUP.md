@@ -68,11 +68,17 @@ exam papers. Workflow:
    key), with a **provider switch between Gemini and DeepSeek**, each with
    its own model choice and its own multi-key pool. In Gemini mode the crop
    goes straight to a Gemini vision call. In DeepSeek mode — since
-   DeepSeek's API cannot read images — a Gemini key first transcribes the
-   crop with a minimal plain-text prompt (extractor Gemini pool, or the
-   Question Editor's key as fallback), and DeepSeek then does all the heavy
-   structuring/solving/explanation work, keeping most token usage on your
-   DeepSeek limits. Add multiple keys per provider from separate
+   DeepSeek's API cannot read images — a **dedicated vision model** first
+   transcribes the crop with a minimal plain-text prompt, and DeepSeek then
+   does all the heavy structuring/solving/explanation work, keeping most
+   token usage on your DeepSeek limits. That transcription step defaults to
+   **gemma-4-31b-it** (a Gemma vision model, called via the Gemini API with
+   your extractor Gemini-pool keys, or the Question Editor's key as
+   fallback) — chosen deliberately because it draws on its **own separate
+   free quota**, independent of whichever Gemini model you use for direct
+   Gemini-mode extraction. The vision model is editable in the DeepSeek
+   settings note (dropdown + custom model id field) if you'd rather use a
+   different Gemini/Gemma model for this step. Add multiple keys per provider from separate
    accounts; they're tried in order, and when the active key hits a
    quota/rate limit (HTTP 429 — or 402 insufficient balance for DeepSeek)
    it's automatically deactivated for 24 hours
