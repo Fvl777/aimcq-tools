@@ -63,6 +63,9 @@
         <button id="tab-btn-figures" class="flex-1 py-4 text-center tab-inactive transition-colors flex items-center justify-center gap-2 whitespace-nowrap px-3" onclick="switchTab('figures')">
             <i data-lucide="image-plus" class="w-4 h-4"></i> Figure Updater
         </button>
+        <button id="tab-btn-extractor" class="flex-1 py-4 text-center tab-inactive transition-colors flex items-center justify-center gap-2 whitespace-nowrap px-3" onclick="switchTab('extractor')">
+            <i data-lucide="scan-text" class="w-4 h-4"></i> Question Extractor
+        </button>
         <button id="tab-btn-builder" class="flex-1 py-4 text-center tab-inactive transition-colors flex items-center justify-center gap-2 whitespace-nowrap px-3" onclick="switchTab('builder')">
             <i data-lucide="layout-template" class="w-4 h-4"></i> Frontend Builder
         </button>
@@ -737,6 +740,137 @@
 
         </div>
         <!-- end figure updater tab -->
+
+        <!-- ==================== QUESTION EXTRACTOR TAB ==================== -->
+        <div id="tab-extractor" class="hidden space-y-5">
+
+            <!-- AI status + output language -->
+            <div class="flex items-center justify-between gap-3 flex-wrap bg-white border border-rose-200 rounded-xl px-4 py-3 shadow-sm">
+                <div class="flex items-center gap-3 min-w-0">
+                    <span class="w-8 h-8 rounded-lg bg-rose-100 flex items-center justify-center flex-shrink-0">
+                        <i data-lucide="scan-text" class="w-4 h-4 text-rose-600"></i>
+                    </span>
+                    <div class="min-w-0">
+                        <p class="text-sm font-bold text-gray-800">AI Question Extraction <span class="text-rose-500 font-semibold">(Gemini)</span></p>
+                        <p class="text-xs text-gray-400">Crop a question from a PDF/image — AI transcribes it into question, options &amp; explanation. Uses the Gemini key from the Question Editor tab's AI settings.</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 flex-shrink-0">
+                    <label class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Output</label>
+                    <select id="qx-lang" class="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-rose-400">
+                        <option value="auto">Auto-detect language</option>
+                        <option value="en">English</option>
+                        <option value="hi">Hindi</option>
+                        <option value="bilingual">Bilingual (EN + HI)</option>
+                    </select>
+                    <span id="qx-ai-status" class="ai-status-chip off">Not configured</span>
+                </div>
+            </div>
+
+            <!-- Step 1: Load source -->
+            <div class="space-y-3">
+                <div class="flex items-center gap-3">
+                    <span class="w-7 h-7 rounded-full bg-rose-600 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">1</span>
+                    <h3 class="font-semibold text-gray-800">Load Exam PDF or Image <span class="text-gray-400 font-normal text-sm">(to crop questions from)</span></h3>
+                </div>
+                <div id="qx-source-pick" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div class="fig-upload-area" onclick="document.getElementById('qx-pdf-file').click()">
+                        <input type="file" id="qx-pdf-file" accept="application/pdf" class="hidden">
+                        <i data-lucide="file-up" class="w-9 h-9 mx-auto text-gray-400 mb-2"></i>
+                        <p class="text-sm text-gray-700 font-semibold">Upload a PDF</p>
+                        <p class="text-xs text-gray-400 mt-1">Rendered at high fidelity for accurate cropping</p>
+                    </div>
+                    <div class="fig-upload-area" onclick="document.getElementById('qx-img-file').click()">
+                        <input type="file" id="qx-img-file" accept="image/*" class="hidden">
+                        <i data-lucide="image-plus" class="w-9 h-9 mx-auto text-gray-400 mb-2"></i>
+                        <p class="text-sm text-gray-700 font-semibold">Upload an image</p>
+                        <p class="text-xs text-gray-400 mt-1">PNG, JPG, WEBP — screenshot or photo of the paper</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Viewer + crop + extract -->
+            <div id="qx-workspace" class="hidden space-y-4">
+                <div class="flex items-center gap-3">
+                    <span class="w-7 h-7 rounded-full bg-rose-600 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">2</span>
+                    <h3 class="font-semibold text-gray-800">Crop a question <span class="text-gray-400 font-normal text-sm">(drag around ONE full question, like Google Lens)</span></h3>
+                </div>
+                <div class="fig-pdf-stage">
+                    <div class="fig-page-nav">
+                        <button type="button" class="fig-nav-btn" id="qx-prev-page">&laquo; Prev</button>
+                        <span>Page <b id="qx-cur-page">1</b> / <b id="qx-total-pages">--</b></span>
+                        <button type="button" class="fig-nav-btn" id="qx-next-page">Next &raquo;</button>
+                        <span class="fig-nav-sep"></span>
+                        <span class="ml-1">Zoom</span>
+                        <button type="button" class="fig-nav-btn" id="qx-zoom-out" title="Zoom out">&minus;</button>
+                        <input type="text" class="fig-zoom-input" id="qx-zoom-val" value="100%" readonly>
+                        <button type="button" class="fig-nav-btn" id="qx-zoom-in" title="Zoom in">+</button>
+                        <button type="button" class="fig-nav-btn" id="qx-zoom-reset" title="Reset zoom to fit">Fit</button>
+                        <span class="fig-nav-sep"></span>
+                        <button type="button" class="fig-nav-btn" id="qx-change-file" title="Load a different PDF or image">Change File</button>
+                    </div>
+                    <div id="qx-pdf-scroll" class="fig-pdf-scroll">
+                        <div class="fig-pdf-wrap">
+                            <canvas id="qx-canvas"></canvas>
+                        </div>
+                    </div>
+                    <p class="fig-crop-hint">
+                        <i data-lucide="info" class="w-3 h-3"></i>
+                        Crop mode is always <b>on</b> — drag a box around one complete question (statement + options), then click <b>Extract Question with AI</b>.
+                    </p>
+                </div>
+                <button id="qx-extract-btn" class="w-full bg-rose-600 hover:bg-rose-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold py-2.5 px-5 rounded-xl text-sm flex items-center justify-center gap-2 transition-colors shadow-sm">
+                    <i data-lucide="sparkles" class="w-4 h-4"></i> <span id="qx-extract-label">Extract Question with AI</span>
+                </button>
+            </div>
+
+            <!-- Step 3: Review -->
+            <div id="qx-review" class="hidden space-y-3">
+                <div class="flex items-center gap-3">
+                    <span class="w-7 h-7 rounded-full bg-rose-600 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">3</span>
+                    <h3 class="font-semibold text-gray-800">Review &amp; save</h3>
+                    <span id="qx-confidence" class="ai-status-chip off"></span>
+                </div>
+                <div class="bg-white border border-gray-200 rounded-2xl p-4 space-y-4 shadow-sm">
+                    <div class="flex items-start gap-3 flex-wrap">
+                        <img id="qx-crop-thumb" class="qx-crop-thumb" alt="cropped question">
+                        <p id="qx-ai-note" class="text-xs text-gray-500 flex-1 min-w-[200px]"></p>
+                    </div>
+                    <div id="qx-fields"><!-- primary language fields (rendered by JS) --></div>
+                    <div id="qx-fields-hi" class="hidden border-t border-gray-100 pt-4"><!-- hindi fields --></div>
+                    <div class="flex items-center gap-2 flex-wrap pt-1">
+                        <button id="qx-save-btn" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-lg transition-colors flex items-center gap-1.5">
+                            <i data-lucide="database" class="w-4 h-4"></i> Save to Question Bank
+                        </button>
+                        <button id="qx-discard-btn" class="bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm font-semibold py-2 px-4 rounded-lg transition-colors flex items-center gap-1.5">
+                            <i data-lucide="x" class="w-4 h-4"></i> Discard
+                        </button>
+                        <span class="text-[11px] text-gray-400">Saved locally (IndexedDB) — survives refresh &amp; browser close.</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Question Bank -->
+            <div class="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+                <div class="flex items-center justify-between gap-2 flex-wrap px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+                    <p class="text-sm font-bold text-gray-800 flex items-center gap-2">
+                        <i data-lucide="database" class="w-4 h-4 text-rose-600"></i> Question Bank
+                        <span id="qx-bank-count" class="ai-status-chip off">0 questions</span>
+                    </p>
+                    <div class="flex items-center gap-2">
+                        <button id="qx-export-btn" class="text-xs bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-3.5 rounded-lg transition-colors flex items-center gap-1.5">
+                            <i data-lucide="download" class="w-3.5 h-3.5"></i> Export JSON
+                        </button>
+                        <button id="qx-clear-btn" class="text-xs bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-semibold py-2 px-3.5 rounded-lg transition-colors flex items-center gap-1.5">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Delete All
+                        </button>
+                    </div>
+                </div>
+                <div id="qx-bank-list" class="divide-y divide-gray-100 max-h-[420px] overflow-y-auto custom-scrollbar">
+                    <p class="text-sm text-gray-400 px-4 py-6 text-center">No questions saved yet — crop &amp; extract your first question above.</p>
+                </div>
+            </div>
+        </div>
 
         <!-- ==================== FRONTEND BUILDER TAB ==================== -->
         <div id="tab-builder" class="hidden space-y-5">
