@@ -6429,7 +6429,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v1.6.1 (Gemini auth via header, key sanitation, precise key-error diagnosis + per-key Test) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v1.6.2 (dedicated Gemma vision model for DeepSeek transcription step) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -7025,6 +7025,10 @@ function qeAiApply(mode) {
     document.addEventListener('change', function (e) {
         if (e.target && e.target.id === 'ai-model') {
             const customEl = document.getElementById('ai-model-custom');
+            if (customEl) customEl.classList.toggle('hidden', e.target.value !== 'custom');
+        }
+        if (e.target && e.target.id === 'qx-vision-model') {
+            const customEl = document.getElementById('qx-vision-model-custom');
             if (customEl) customEl.classList.toggle('hidden', e.target.value !== 'custom');
         }
     });
@@ -7878,10 +7882,19 @@ const QX_PROVIDERS = {
     },
 };
 
+const QX_VISION_MODELS = [
+    ['gemma-4-31b-it', 'gemma-4-31b-it (Gemma vision — recommended, separate free quota from Gemini)'],
+    ['gemini-2.0-flash', 'gemini-2.0-flash'],
+    ['gemini-1.5-flash', 'gemini-1.5-flash'],
+    ['gemini-2.5-flash', 'gemini-2.5-flash'],
+    ['custom', 'Custom model id…'],
+];
+const QX_VISION_MODEL_DEFAULT = 'gemma-4-31b-it';
+
 let qxPools = {
     provider: 'gemini',
     gemini:   { model: 'gemini-2.5-flash', keys: [] },
-    deepseek: { model: 'deepseek-chat', keys: [] },
+    deepseek: { model: 'deepseek-chat', keys: [], visionModel: QX_VISION_MODEL_DEFAULT },
 };
 // key: { id, label, key, disabledUntil }  — disabledUntil: epoch ms (0 = active)
 
@@ -7906,6 +7919,7 @@ function qxPoolLoad() {
                     qxPools[pr].model = src.model || QX_PROVIDERS[pr].defaultModel;
                     qxPools[pr].keys = qxNormKeys(src.keys);
                 });
+                qxPools.deepseek.visionModel = (p.deepseek && p.deepseek.visionModel) || QX_VISION_MODEL_DEFAULT;
             }
         } else {
             // Migrate the old single-provider (Gemini) pool if present.
@@ -7994,9 +8008,21 @@ function qxPoolRenderKeys() {
             ? pool.model : QX_PROVIDERS[provider].defaultModel;
     }
 
-    // DeepSeek pipeline note
+    // DeepSeek pipeline note + vision-model selector
     const dsNote = document.getElementById('qx-deepseek-note');
     if (dsNote) dsNote.classList.toggle('hidden', provider !== 'deepseek');
+    const visSel = document.getElementById('qx-vision-model');
+    const visCustom = document.getElementById('qx-vision-model-custom');
+    if (visSel) {
+        visSel.innerHTML = QX_VISION_MODELS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+        const vm = qxPools.deepseek.visionModel || QX_VISION_MODEL_DEFAULT;
+        const known = QX_VISION_MODELS.some(m => m[0] === vm);
+        visSel.value = known ? vm : 'custom';
+        if (visCustom) {
+            visCustom.classList.toggle('hidden', known);
+            visCustom.value = known ? '' : vm;
+        }
+    }
 
     if (!pool.keys.length) {
         list.innerHTML = `<p class="text-xs text-gray-400 py-1">No ${QX_PROVIDERS[provider].label} keys yet — click <b>Add API key</b> to add your first key.</p>`;
@@ -8060,6 +8086,15 @@ function qxPoolSave() {
     const modelSel = document.getElementById('qx-model');
     const pool = qxActivePool();
     if (modelSel && modelSel.value) pool.model = modelSel.value;
+    if (qxPools.provider === 'deepseek' || true) {
+        const visSel = document.getElementById('qx-vision-model');
+        const visCustom = document.getElementById('qx-vision-model-custom');
+        if (visSel) {
+            qxPools.deepseek.visionModel = visSel.value === 'custom'
+                ? (visCustom && visCustom.value.trim()) || QX_VISION_MODEL_DEFAULT
+                : visSel.value;
+        }
+    }
     pool.keys = pool.keys.filter(k => k.key || k.label);
     qxPoolPersist();
     qxPoolRenderKeys();
@@ -8139,9 +8174,10 @@ async function qxAiCall(prompt, opts, provider) {
     }
     for (const k of candidates) {
         try {
+            const useModel = opts.modelOverride || pool.model;
             const text = provider === 'deepseek'
-                ? await aiDeepseekRequest(prompt, Object.assign({}, opts, { key: k.key, model: pool.model }))
-                : await aiGeminiRequest(prompt, Object.assign({}, opts, { key: k.key, model: pool.model }));
+                ? await aiDeepseekRequest(prompt, Object.assign({}, opts, { key: k.key, model: useModel }))
+                : await aiGeminiRequest(prompt, Object.assign({}, opts, { key: k.key, model: useModel }));
             return { text, keyUsed: k, provider };
         } catch (err) {
             if (qxIsLimitError(err)) {
@@ -8167,18 +8203,22 @@ const QX_TRANSCRIBE_PROMPT =
     'Include any printed answer marking. Output ONLY the raw transcription — no commentary.';
 
 async function qxGeminiTranscribe(imageB64) {
+    const visionModel = qxPools.deepseek.visionModel || QX_VISION_MODEL_DEFAULT;
     // Prefer the extractor's Gemini pool (with failover); fall back to the
-    // Question Editor's Gemini key if the pool is empty.
+    // Question Editor's Gemini key if the pool is empty. Always uses the
+    // dedicated vision model (default: gemma-4-31b-it) — independent of
+    // whichever Gemini model is selected for direct Gemini-mode extraction,
+    // so it draws on its own free-tier quota.
     if (qxPoolConfiguredKeys('gemini').length) {
         const call = await qxAiCall(QX_TRANSCRIBE_PROMPT,
-            { imageB64, imageMime: 'image/webp', plainText: true }, 'gemini');
+            { imageB64, imageMime: 'image/webp', plainText: true, modelOverride: visionModel }, 'gemini');
         return call.text;
     }
     if (typeof aiConfigured === 'function' && aiConfigured()) {
         return aiGeminiRequest(QX_TRANSCRIBE_PROMPT,
-            { imageB64, imageMime: 'image/webp', plainText: true });
+            { imageB64, imageMime: 'image/webp', plainText: true, model: visionModel });
     }
-    throw new Error('DeepSeek mode needs a Gemini key for reading the image (DeepSeek has no image input). Add a Gemini key to the extractor pool, or configure the Question Editor\'s AI settings.');
+    throw new Error('DeepSeek mode needs a Gemini-API key for reading the image (DeepSeek has no image input). Add a Gemini key to the extractor pool, or configure the Question Editor\'s AI settings.');
 }
 
 async function qxRunExtraction(buildPrompt, langMode, imageB64) {
