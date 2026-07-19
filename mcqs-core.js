@@ -6429,7 +6429,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v1.9.0 (explanation depth control — Detailed teaching mode for weak students, default on) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v2.0.0 (question bank libraries — per-subject collections with scoped export/delete) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -6774,6 +6774,17 @@ function qeAiCollect() {
 }
 
 // ---------- prompt ----------
+// LaTeX notation rule shared by every AI prompt in the tool. Applies to
+// math AND non-math content (chemistry, geography, GK, units, dates...):
+// all sub/superscripts and degree symbols go through KaTeX-renderable LaTeX.
+const AI_LATEX_NOTATION_RULE =
+    'NOTATION — LaTeX for scripts & degrees (critical, applies to BOTH math and non-math content): ' +
+    'ALL superscripts, subscripts and degree symbols MUST be written as LaTeX inside $...$ delimiters, wherever they occur — in the question text, in every option, and throughout the explanation — regardless of subject (mathematics, physics, chemistry, biology, geography, general knowledge). ' +
+    'Examples: powers/exponents $x^2$, $10^{-3}$, $2^n$; units $m^2$, $cm^3$, $km^2$, $m/s^2$; chemical formulas $H_2O$, $CO_2$, $C_6H_{12}O_6$; ions/charges $Na^+$, $Ca^{2+}$, $SO_4^{2-}$; isotopes/mass numbers $^{235}U$, $^{14}C$; angles, temperatures and coordinates $45^\\circ$, $90^\\circ$, $30^\\circ C$, $-5^\\circ C$, $23.5^\\circ N$, $82.5^\\circ E$; indexed terms $a_n$, $x_1$, $v_0$. ' +
+    'Scripts longer than one character need braces: $10^{-3}$ (not $10^-3$), $SO_4^{2-}$, $C_6H_{12}O_6$. ' +
+    'NEVER use raw Unicode superscript/subscript/degree characters (\u00b2 \u00b3 \u2070 \u2075 \u2081 \u2082 \u207a \u207b \u00b0 \u00bd etc.) and NEVER use HTML <sub>/<sup> tags for any of these — convert every occurrence (including ones printed that way in the source image/text) into the LaTeX form. ' +
+    'Ordinary words like "degree"/"degrees" written out with no numeric value stay as plain text.';
+
 // Shared instruction for how thorough the generated explanation must be.
 // "detailed" is written for weak students: teach, don't just state.
 function aiDetailInstruction(level, pName) {
@@ -6814,6 +6825,8 @@ function qeAiBuildPrompt(q, suggestIdx, wantSteps, detailLevel) {
     lines.push('Your job: independently solve the multiple-choice question below, then cross-check whether the currently marked correct option is REALLY correct. Be careful and rigorous — do not assume the marked answer is right.');
     lines.push('');
     lines.push(`THE QUESTION'S CONTENT LANGUAGE IS ${pName}. All generated explanation content must be in the question's own language — never translate it to another language.`);
+    lines.push('');
+    lines.push(AI_LATEX_NOTATION_RULE);
     lines.push('');
     lines.push('QUESTION (plain text; may contain LaTeX between $...$ / \\(...\\) and [FIGURE: ...] placeholders):');
     lines.push(aiHtmlToPlain(q.question) || '(empty)');
@@ -7284,15 +7297,22 @@ const qxState = {
 
 // ---------- IndexedDB question bank ----------
 const QX_DB_NAME = 'aimcq_question_bank';
+const QX_DB_VER = 2;
 const QX_STORE = 'questions';
+const QX_LIB_STORE = 'libraries';
+const QX_LIB_DEFAULT = 'general';
+const QX_LIB_SEL_KEY = 'aimcq_qx_lib_selection';   // { save, view }
 
 function qxOpenDb() {
     return new Promise((resolve, reject) => {
-        const req = indexedDB.open(QX_DB_NAME, 1);
+        const req = indexedDB.open(QX_DB_NAME, QX_DB_VER);
         req.onupgradeneeded = e => {
             const db = e.target.result;
             if (!db.objectStoreNames.contains(QX_STORE)) {
                 db.createObjectStore(QX_STORE, { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains(QX_LIB_STORE)) {
+                db.createObjectStore(QX_LIB_STORE, { keyPath: 'id' });
             }
         };
         req.onsuccess = e => resolve(e.target.result);
@@ -7320,6 +7340,84 @@ function qxDbAll() {
         req.onsuccess = () => { db.close(); resolve(req.result || []); };
         req.onerror = () => { db.close(); reject(req.error); };
     }));
+}
+
+// ---------- subject libraries ----------
+function qxLibAll() {
+    return qxOpenDb().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(QX_LIB_STORE, 'readonly');
+        const req = tx.objectStore(QX_LIB_STORE).getAll();
+        req.onsuccess = () => { db.close(); resolve(req.result || []); };
+        req.onerror = () => { db.close(); reject(req.error); };
+    }));
+}
+function qxLibOp(fn) {
+    return qxOpenDb().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(QX_LIB_STORE, 'readwrite');
+        fn(tx.objectStore(QX_LIB_STORE));
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+    }));
+}
+// Ensure the default "General" library exists; returns the full list.
+async function qxLibEnsure() {
+    let libs = [];
+    try { libs = await qxLibAll(); } catch (e) {}
+    if (!libs.some(l => l.id === QX_LIB_DEFAULT)) {
+        const gen = { id: QX_LIB_DEFAULT, name: 'General', created: new Date().toISOString() };
+        try { await qxLibOp(st => st.put(gen)); libs.push(gen); } catch (e) {}
+    }
+    libs.sort((a, b) => a.id === QX_LIB_DEFAULT ? -1 : b.id === QX_LIB_DEFAULT ? 1 : String(a.name).localeCompare(String(b.name)));
+    return libs;
+}
+function qxLibSelection() {
+    try {
+        const raw = localStorage.getItem(QX_LIB_SEL_KEY);
+        if (raw) { const p = JSON.parse(raw); return { save: p.save || QX_LIB_DEFAULT, view: p.view || 'all' }; }
+    } catch (e) {}
+    return { save: QX_LIB_DEFAULT, view: 'all' };
+}
+function qxLibSaveSelection(sel) {
+    try { localStorage.setItem(QX_LIB_SEL_KEY, JSON.stringify(sel)); } catch (e) {}
+}
+async function qxLibCreate() {
+    const name = (window.prompt('New library name (subject), e.g. Physics, History, Maths:') || '').trim();
+    if (!name) return;
+    const libs = await qxLibEnsure();
+    if (libs.some(l => l.name.toLowerCase() === name.toLowerCase())) {
+        showToast('Library exists', `A library named "${name}" already exists.`, 'error');
+        return;
+    }
+    const id = 'lib-' + Date.now();
+    try { await qxLibOp(st => st.put({ id, name, created: new Date().toISOString() })); } catch (e) {
+        showToast('Create failed', 'IndexedDB error: ' + (e.message || e), 'error'); return;
+    }
+    const sel = qxLibSelection();
+    sel.save = id;                       // new questions go to the new library
+    sel.view = id;                       // and show it right away
+    qxLibSaveSelection(sel);
+    await qxRenderBank();
+    showToast('Library created', `"${name}" — new questions will now be saved there.`, 'success');
+}
+async function qxLibDeleteCurrent() {
+    const sel = qxLibSelection();
+    if (sel.view === 'all' || sel.view === QX_LIB_DEFAULT) return;
+    const libs = await qxLibEnsure();
+    const lib = libs.find(l => l.id === sel.view);
+    if (!lib) return;
+    let recs = [];
+    try { recs = await qxDbAll(); } catch (e) {}
+    const inLib = recs.filter(r => (r.library || QX_LIB_DEFAULT) === lib.id);
+    if (!window.confirm(`Delete library "${lib.name}" and its ${inLib.length} question${inLib.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    try {
+        await qxDbOp('readwrite', st => { inLib.forEach(r => st.delete(r.id)); });
+        await qxLibOp(st => st.delete(lib.id));
+    } catch (e) {}
+    if (sel.save === lib.id) sel.save = QX_LIB_DEFAULT;
+    sel.view = 'all';
+    qxLibSaveSelection(sel);
+    await qxRenderBank();
+    showToast('Library deleted', `"${lib.name}" and its questions were removed.`, 'info');
 }
 
 // ---------- viewer (mirrors the Figure Updater's canvas) ----------
@@ -7503,9 +7601,9 @@ function qxBuildPrompt(langMode, transcript, wantSteps, detailLevel) {
     }
     L.push('');
     L.push('TRANSCRIPTION RULES:');
-    L.push(`- ${transcript ? 'Reconstruct the question text EXACTLY as transcribed (fix only obvious OCR-level artifacts)' : 'Transcribe the question text EXACTLY as printed (fix only obvious OCR-level artifacts)'}. Use minimal clean HTML (<b>, <i>, <br>, <sub>, <sup>).`);
+    L.push(`- ${transcript ? 'Reconstruct the question text EXACTLY as transcribed (fix only obvious OCR-level artifacts)' : 'Transcribe the question text EXACTLY as printed (fix only obvious OCR-level artifacts)'}. Use minimal clean HTML (<b>, <i>, <br>) — do NOT use <sub>/<sup> tags (see the NOTATION rule below).`);
     L.push('- LINE BREAKS (critical — do NOT copy the image\'s visual word-wrap): only insert a <br> where there is a genuine logical break — a new labeled statement/point (A./B./I./II./1./2. etc.), a distinct sentence that is clearly a separate line/point by the author\'s intent, or a real paragraph break. If a sentence merely wraps to the next visual line in the source because of column/page width, that is NOT a break — join the wrapped words back into ONE continuous line with a single space (do not insert <br>, and do not preserve a line break just because the source image had one there). When in doubt whether a break is logical or just word-wrap, prefer joining the text into one continuous line/sentence over inserting a <br>.');
-    L.push('- Mathematical content must be written as LaTeX between $...$ delimiters.');
+    L.push('- ' + AI_LATEX_NOTATION_RULE);
     L.push('- Do NOT include the question number prefix (e.g. "20.", "Q7)") in the question text.');
     L.push('- If the question contains a diagram/figure/graph, insert the placeholder [image here: <very short description>] at its exact position in the question text — do not try to describe the figure in full.');
     L.push('- Transcribe ALL options in order, WITHOUT their labels ("(1)", "(a)", "A." etc.). If an option is a figure, use [image here: <short description>] as that option\'s text.');
@@ -7757,54 +7855,90 @@ async function qxSaveToBank() {
         embedded_media: [],
     };
 
+    const saveLib = (document.getElementById('qx-save-lib') || {}).value || qxLibSelection().save || QX_LIB_DEFAULT;
     try {
         await qxDbPut({
             id,
             created: new Date().toISOString(),
             language: isHiOnly ? 'hi' : (hi ? 'bilingual' : r.language),
             thumb: qxState.cropThumb || '',
+            library: saveLib,
             post,
         });
     } catch (err) {
         showToast('Save failed', 'IndexedDB error: ' + (err.message || err), 'error');
         return;
     }
+    { const sel = qxLibSelection(); sel.save = saveLib; qxLibSaveSelection(sel); }
 
     qxState.result = null;
     document.getElementById('qx-review').classList.add('hidden');
     await qxRenderBank();
-    showToast('Saved to Question Bank', 'Stored locally — crop the next question to continue.', 'success');
+    {
+        const libs = await qxLibEnsure();
+        const libName = (libs.find(l => l.id === saveLib) || {}).name || 'General';
+        showToast('Saved to Question Bank', `Stored in "${libName}" — crop the next question to continue.`, 'success');
+    }
 }
 
 async function qxRenderBank() {
     const list = document.getElementById('qx-bank-list');
     const countChip = document.getElementById('qx-bank-count');
     if (!list) return;
+
+    const libs = await qxLibEnsure();
+    const sel = qxLibSelection();
+    if (sel.view !== 'all' && !libs.some(l => l.id === sel.view)) sel.view = 'all';
+    if (!libs.some(l => l.id === sel.save)) sel.save = QX_LIB_DEFAULT;
+    qxLibSaveSelection(sel);
+    const libName = id => (libs.find(l => l.id === id) || {}).name || 'General';
+
+    // Populate both selectors
+    const saveSel = document.getElementById('qx-save-lib');
+    if (saveSel) {
+        saveSel.innerHTML = libs.map(l => `<option value="${l.id}">${qxEsc(l.name)}</option>`).join('');
+        saveSel.value = sel.save;
+    }
+    const viewSel = document.getElementById('qx-lib-view');
+    if (viewSel) {
+        viewSel.innerHTML = '<option value="all">All libraries</option>' +
+            libs.map(l => `<option value="${l.id}">${qxEsc(l.name)}</option>`).join('');
+        viewSel.value = sel.view;
+    }
+    const delLibBtn = document.getElementById('qx-lib-del');
+    if (delLibBtn) delLibBtn.classList.toggle('hidden', sel.view === 'all' || sel.view === QX_LIB_DEFAULT);
+    const clearLabel = document.getElementById('qx-clear-label');
+    if (clearLabel) clearLabel.textContent = sel.view === 'all' ? 'Delete All' : `Delete All in "${libName(sel.view)}"`;
+
     let recs = [];
     try { recs = await qxDbAll(); } catch (e) {}
-    recs.sort((a, b) => (a.id || 0) - (b.id || 0));
+    recs.forEach(r => { if (!r.library) r.library = QX_LIB_DEFAULT; });   // v1 records → General
+    const shown = sel.view === 'all' ? recs : recs.filter(r => r.library === sel.view);
+    shown.sort((a, b) => (a.id || 0) - (b.id || 0));
 
     if (countChip) {
-        countChip.textContent = `${recs.length} question${recs.length === 1 ? '' : 's'}`;
-        countChip.classList.toggle('on', recs.length > 0);
-        countChip.classList.toggle('off', recs.length === 0);
+        const scope = sel.view === 'all' ? `across ${libs.length} librar${libs.length === 1 ? 'y' : 'ies'}` : `in ${libName(sel.view)}`;
+        countChip.textContent = `${shown.length} question${shown.length === 1 ? '' : 's'} ${scope}`;
+        countChip.classList.toggle('on', shown.length > 0);
+        countChip.classList.toggle('off', shown.length === 0);
     }
 
-    if (!recs.length) {
-        list.innerHTML = '<p class="text-sm text-gray-400 px-4 py-6 text-center">No questions saved yet — crop &amp; extract your first question above.</p>';
+    if (!shown.length) {
+        list.innerHTML = `<p class="text-sm text-gray-400 px-4 py-6 text-center">No questions ${sel.view === 'all' ? 'saved yet' : `in "${qxEsc(libName(sel.view))}" yet`} — crop &amp; extract a question above.</p>`;
         return;
     }
 
-    list.innerHTML = recs.map((rec, i) => {
+    list.innerHTML = shown.map((rec, i) => {
         const title = qxEsc(stripHtmlTags((rec.post && rec.post.post_title) || '').slice(0, 90));
         const langBadge = rec.language === 'bilingual' ? 'EN+HI' : (rec.language || 'en').toUpperCase();
         const date = rec.created ? new Date(rec.created).toLocaleString() : '';
+        const libBadge = sel.view === 'all' ? `<span class="qx-lib-badge">${qxEsc(libName(rec.library))}</span> · ` : '';
         return `
         <div class="qx-bank-row" data-id="${rec.id}">
             ${rec.thumb ? `<img src="${rec.thumb}" class="qx-bank-thumb" alt="">` : '<div class="qx-bank-thumb qx-bank-thumb-empty"><i data-lucide="file-question" class="w-4 h-4"></i></div>'}
             <div class="qx-bank-main">
                 <p class="qx-bank-title"><span class="qx-bank-num">${i + 1}.</span> ${title || '(untitled)'}</p>
-                <p class="qx-bank-sub">${langBadge} · ${(rec.post && rec.post.meta_input && rec.post.meta_input._aimcq_options || []).length} options · ${qxEsc(date)}</p>
+                <p class="qx-bank-sub">${libBadge}${langBadge} · ${(rec.post && rec.post.meta_input && rec.post.meta_input._aimcq_options || []).length} options · ${qxEsc(date)}</p>
             </div>
             <button type="button" class="qx-bank-del" data-id="${rec.id}" title="Delete this question from the bank">
                 <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
@@ -7822,18 +7956,26 @@ async function qxRenderBank() {
 }
 
 async function qxExportBank() {
+    const libs = await qxLibEnsure();
+    const sel = qxLibSelection();
     let recs = [];
     try { recs = await qxDbAll(); } catch (e) {}
-    if (!recs.length) { showToast('Bank empty', 'Save at least one question before exporting.', 'error'); return; }
-    recs.sort((a, b) => (a.id || 0) - (b.id || 0));
+    recs.forEach(r => { if (!r.library) r.library = QX_LIB_DEFAULT; });
+    const scoped = sel.view === 'all' ? recs : recs.filter(r => r.library === sel.view);
+    if (!scoped.length) { showToast('Nothing to export', sel.view === 'all' ? 'Save at least one question before exporting.' : 'This library is empty.', 'error'); return; }
+    scoped.sort((a, b) => (a.id || 0) - (b.id || 0));
+    const libName = sel.view === 'all' ? 'all' : ((libs.find(l => l.id === sel.view) || {}).name || 'library');
+    const slug = String(libName).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'library';
     const data = {
         version: '1.8.0',
         export_type: 'question_bank',
+        library: sel.view === 'all' ? undefined : libName,
         terms: [],
-        posts: recs.map(r => r.post),
+        posts: scoped.map(r => r.post),
     };
-    downloadJSON(data, `question_bank_${Date.now()}.json`);
-    showToast('Exported', `${recs.length} questions exported in standard question JSON format.`, 'success');
+    if (data.library === undefined) delete data.library;
+    downloadJSON(data, `question_bank_${slug}_${Date.now()}.json`);
+    showToast('Exported', `${scoped.length} question${scoped.length === 1 ? '' : 's'} from ${sel.view === 'all' ? 'all libraries' : `"${libName}"`} — standard question JSON.`, 'success');
 }
 
 // ---------- boot / wiring ----------
@@ -7884,12 +8026,35 @@ async function qxExportBank() {
         });
         document.getElementById('qx-export-btn').addEventListener('click', qxExportBank);
         document.getElementById('qx-clear-btn').addEventListener('click', async () => {
-            const recs = await qxDbAll().catch(() => []);
-            if (!recs.length) { showToast('Bank empty', 'Nothing to delete.', 'info'); return; }
-            if (!window.confirm(`Delete ALL ${recs.length} questions from the Question Bank? This cannot be undone.`)) return;
-            try { await qxDbClear(); } catch (e) {}
+            const sel = qxLibSelection();
+            let recs = await qxDbAll().catch(() => []);
+            recs.forEach(r => { if (!r.library) r.library = QX_LIB_DEFAULT; });
+            const scoped = sel.view === 'all' ? recs : recs.filter(r => r.library === sel.view);
+            if (!scoped.length) { showToast('Nothing to delete', 'This view has no questions.', 'info'); return; }
+            const libs = await qxLibEnsure();
+            const where = sel.view === 'all' ? 'the ENTIRE Question Bank (all libraries)' : `library "${(libs.find(l => l.id === sel.view) || {}).name || ''}"`;
+            if (!window.confirm(`Delete ALL ${scoped.length} question${scoped.length === 1 ? '' : 's'} from ${where}? This cannot be undone.`)) return;
+            try {
+                if (sel.view === 'all') await qxDbClear();
+                else await qxDbOp('readwrite', st => { scoped.forEach(r => st.delete(r.id)); });
+            } catch (e) {}
             qxRenderBank();
-            showToast('Question Bank cleared', 'All saved questions were deleted.', 'info');
+            showToast('Deleted', `${scoped.length} question${scoped.length === 1 ? '' : 's'} removed from ${sel.view === 'all' ? 'all libraries' : 'the library'}.`, 'info');
+        });
+
+        // Library controls
+        const libNew = document.getElementById('qx-lib-new');
+        if (libNew) libNew.addEventListener('click', qxLibCreate);
+        const libDel = document.getElementById('qx-lib-del');
+        if (libDel) libDel.addEventListener('click', qxLibDeleteCurrent);
+        const saveSel = document.getElementById('qx-save-lib');
+        if (saveSel) saveSel.addEventListener('change', () => {
+            const sel = qxLibSelection(); sel.save = saveSel.value; qxLibSaveSelection(sel);
+        });
+        const viewSel = document.getElementById('qx-lib-view');
+        if (viewSel) viewSel.addEventListener('change', () => {
+            const sel = qxLibSelection(); sel.view = viewSel.value; qxLibSaveSelection(sel);
+            qxRenderBank();
         });
 
         qxRenderBank();          // restore persisted bank on load
@@ -8297,7 +8462,7 @@ const QX_TRANSCRIBE_PROMPT =
     'Transcribe ALL text visible in this image EXACTLY, in correct reading order. ' +
     'CRITICAL — do NOT copy the image\'s visual word-wrap: if a sentence merely wraps to the next visual line because of column/page width, join the wrapped words back into ONE continuous line with a single space — do NOT start a new line there. ' +
     'Only start a new line for a GENUINE logical break: a new labeled statement/point (A./B./I./II./1./2. etc.), a clearly separate sentence/point by the author\'s intent, or a real paragraph break. When unsure whether a break is logical or just visual wrapping, join the text into one continuous line instead of breaking it. ' +
-    'Write mathematical content as LaTeX between $...$ delimiters. ' +
+    'Write mathematical content as LaTeX between $...$ delimiters — and ALL superscripts, subscripts and degree symbols, in math AND non-math text alike, as LaTeX too: powers $x^2$/$10^{-3}$, units $m^2$/$km^2$, chemical formulas $H_2O$/$CO_2$/$SO_4^{2-}$, ions $Na^+$, isotopes $^{235}U$, degrees/temperatures/coordinates $45^\\circ$/$30^\\circ C$/$23.5^\\circ N$, indexed terms $a_n$. Multi-character scripts need braces ($10^{-3}$). Never output raw Unicode script/degree characters (\u00b2 \u2082 \u00b0 etc.) or <sub>/<sup> tags — convert them to LaTeX. ' +
     'If a diagram/figure/graph appears, write [image here: <very short description>] at its position. ' +
     'Include any printed answer marking. Output ONLY the raw transcription — no commentary.';
 
