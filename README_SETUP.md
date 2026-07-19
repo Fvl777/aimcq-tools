@@ -131,7 +131,9 @@ exam papers. Workflow:
 3. **Extract Question with AI** uses the tab's **own free-tier API pools**
    ("Extractor API Settings" — fully separate from the Question Editor's
    key), with a **provider switch between Gemini and DeepSeek**, each with
-   its own model choice and its own multi-key pool. In Gemini mode the crop
+   its own model choice and its own multi-key pool (DeepSeek:
+   `deepseek-v4-flash` default, `deepseek-v4-pro`, plus V3 `deepseek-chat` /
+   R1 `deepseek-reasoner`; both providers also accept a custom model id). In Gemini mode the crop
    goes straight to a Gemini vision call. In DeepSeek mode — since
    DeepSeek's API cannot read images — a **dedicated vision model** first
    transcribes the crop with a minimal plain-text prompt, and DeepSeek then
