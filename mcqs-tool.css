@@ -1189,3 +1189,62 @@
     color: #6b7280; font-size: 11.5px; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
+
+/* ===== Question Extractor ===== */
+.qx-crop-thumb {
+    max-width: 220px; max-height: 130px; object-fit: contain;
+    border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb;
+}
+.qx-lbl {
+    display: block; font-size: 11px; font-weight: 700; color: #6b7280;
+    text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px;
+}
+.qx-ta {
+    width: 100%; font-size: 13px; line-height: 1.5; color: #1f2937;
+    border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px;
+    background: #fff; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.qx-ta:focus { outline: none; box-shadow: 0 0 0 2px #fda4af; border-color: #fb7185; }
+.qx-opt-row { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+.qx-opt-radio {
+    display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+    font-size: 11.5px; font-weight: 800; color: #6b7280; flex-shrink: 0;
+    border: 1px solid #e5e7eb; border-radius: 8px; padding: 6px 8px; background: #f9fafb;
+}
+.qx-opt-radio input { accent-color: #059669; }
+.qx-opt-radio:has(input:checked) { background: #ecfdf5; border-color: #a7f3d0; color: #059669; }
+.qx-opt-input {
+    flex: 1; min-width: 0; font-size: 13px; color: #1f2937;
+    border: 1px solid #e5e7eb; border-radius: 8px; padding: 7px 10px; background: #fff;
+}
+.qx-opt-input:focus { outline: none; box-shadow: 0 0 0 2px #fda4af; border-color: #fb7185; }
+.qx-opt-del {
+    flex-shrink: 0; color: #9ca3af; border: 1px solid #e5e7eb; background: #fff;
+    border-radius: 8px; padding: 6px; cursor: pointer; display: inline-flex;
+}
+.qx-opt-del:hover { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
+.qx-add-opt {
+    display: inline-flex; align-items: center; gap: 4px; margin-top: 2px;
+    font-size: 11.5px; font-weight: 700; color: #e11d48; background: #fff;
+    border: 1px dashed #fda4af; border-radius: 8px; padding: 5px 10px; cursor: pointer;
+}
+.qx-add-opt:hover { background: #fff1f2; }
+.qx-bank-row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; }
+.qx-bank-row:hover { background: #fafafa; }
+.qx-bank-thumb {
+    width: 52px; height: 36px; object-fit: cover; border-radius: 6px;
+    border: 1px solid #e5e7eb; background: #f9fafb; flex-shrink: 0;
+}
+.qx-bank-thumb-empty { display: flex; align-items: center; justify-content: center; color: #cbd5e1; }
+.qx-bank-main { flex: 1; min-width: 0; }
+.qx-bank-title {
+    font-size: 13px; font-weight: 600; color: #1f2937;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.qx-bank-num { color: #9ca3af; font-weight: 700; }
+.qx-bank-sub { font-size: 11px; color: #9ca3af; margin-top: 1px; }
+.qx-bank-del {
+    flex-shrink: 0; color: #9ca3af; border: 1px solid #e5e7eb; background: #fff;
+    border-radius: 8px; padding: 7px; cursor: pointer; display: inline-flex;
+}
+.qx-bank-del:hover { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
