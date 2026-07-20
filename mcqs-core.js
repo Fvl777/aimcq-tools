@@ -6429,7 +6429,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v2.1.0 (extractor review: Preview/Editor mode toggle — student-facing rendered preview) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v2.0.0 (question bank libraries — per-subject collections with scoped export/delete) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -7788,74 +7788,8 @@ function qxRenderReview() {
     }));
 
     review.classList.remove('hidden');
-    qxSetReviewMode('preview');   // students-eye view first; Editor is one click away
     lucide.createIcons();
     review.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-// ---------- preview / editor mode ----------
-// Preview renders the CURRENT (possibly edited) field values exactly the
-// way a student sees the question in the quiz frontend — question text,
-// lettered options with the correct one highlighted, and the explanation —
-// with KaTeX rendering. Edits are kept: the editor fields are only hidden,
-// and Preview re-reads them every time it is opened.
-function qxSetReviewMode(mode) {
-    const fields = document.getElementById('qx-fields');
-    const fieldsHi = document.getElementById('qx-fields-hi');
-    const prev = document.getElementById('qx-preview-panel');
-    const switcher = document.getElementById('qx-review-mode');
-    if (!fields || !prev) return;
-    const preview = mode === 'preview';
-    if (switcher) switcher.querySelectorAll('button').forEach(b =>
-        b.classList.toggle('active', b.getAttribute('data-mode') === (preview ? 'preview' : 'editor')));
-
-    if (preview) {
-        const en = qxCollectFields('en');
-        const hi = (qxState.result && qxState.result.hi) ? qxCollectFields('hi') : null;
-        prev.innerHTML = qxBuildPreviewHtml(en, hi);
-        try { if (typeof renderKatex === 'function') prev.querySelectorAll('.qx-prev-katex').forEach(el => renderKatex(el)); } catch (e) {}
-        prev.classList.remove('hidden');
-        fields.classList.add('hidden');
-        if (fieldsHi) fieldsHi.classList.add('hidden');
-    } else {
-        prev.classList.add('hidden');
-        fields.classList.remove('hidden');
-        if (fieldsHi && qxState.result && qxState.result.hi) fieldsHi.classList.remove('hidden');
-    }
-    qxState.reviewMode = preview ? 'preview' : 'editor';
-    try { lucide.createIcons(); } catch (e) {}
-}
-
-function qxPreviewSection(data, langLabel) {
-    if (!data) return '';
-    const opts = data.options
-        .map((o, i) => ({ text: o, i }))
-        .filter(o => o.text !== '');
-    const rows = opts.map((o, shown) => {
-        const letter = OPTION_LETTERS[shown] || String(shown + 1);
-        const correct = o.i === data.correct;
-        return `<div class="qx-prev-opt ${correct ? 'correct' : ''}">
-            <span class="qx-prev-letter">${letter}</span>
-            <span class="qx-prev-opt-text qx-prev-katex">${o.text}</span>
-            ${correct ? '<span class="qx-prev-check">✓ Correct</span>' : ''}
-        </div>`;
-    }).join('');
-    return `
-    <div class="qx-prev-section">
-        ${langLabel ? `<p class="qx-prev-langlabel">${langLabel}</p>` : ''}
-        <div class="qx-prev-q qx-prev-katex">${data.question || '<span class="text-gray-400">(empty question)</span>'}</div>
-        <div class="qx-prev-opts">${rows || '<p class="text-xs text-gray-400">(no options)</p>'}</div>
-        ${(data.explanation || '').trim() ? `
-        <div class="qx-prev-expl">
-            <p class="qx-prev-expl-label">Explanation</p>
-            <div class="qx-prev-katex">${data.explanation}</div>
-        </div>` : ''}
-    </div>`;
-}
-
-function qxBuildPreviewHtml(en, hi) {
-    return qxPreviewSection(en, hi ? 'English' : '')
-        + (hi ? '<div class="qx-prev-divider"></div>' + qxPreviewSection(hi, 'हिन्दी (Hindi)') : '');
 }
 
 function qxCollectFields(prefix) {
