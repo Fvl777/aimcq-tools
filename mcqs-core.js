@@ -3777,10 +3777,9 @@ function figRenderPdfPage(num) {
     figUpdateSourceNav();
 }
 
-// Continuous mode: render the ENTIRE document — every page stacked onto ONE
-// tall canvas — so you can scroll start→end and crop a figure/question that
-// spans any page break. Pages render progressively; dashed lines mark
-// boundaries; page offsets are recorded for nav scrolling.
+// Continuous mode: stack page `startNum` and the following pages onto ONE
+// tall canvas so a figure/question that spills onto the next page can be
+// cropped in a single selection. A dashed line marks each page boundary.
 function figRenderPdfContinuous(startNum) {
     if (!figState.pdfDoc) return;
     figState.srcType = 'pdf';
@@ -3792,8 +3791,10 @@ function figRenderPdfContinuous(startNum) {
     const containerWidth = Math.max(scroll.clientWidth - 4, 200);
     const RASTER = 2.5;
     const total = figState.pdfDoc.numPages;
+    const span = Math.max(1, figState.contSpan || 2);
+    const last = Math.min(total, startNum + span - 1);
     const nums = [];
-    for (let n = 1; n <= total; n++) nums.push(n);   // ALWAYS full document
+    for (let n = startNum; n <= last; n++) nums.push(n);
 
     Promise.all(nums.map(n => figState.pdfDoc.getPage(n))).then(pages => {
         let maxUnscaledW = 0;
@@ -3811,21 +3812,16 @@ function figRenderPdfContinuous(startNum) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, totalW, totalH);
 
-        figState.pageOffsets = [];
-        let acc = 0;
-        for (let i = 0; i < vps.length; i++) { figState.pageOffsets.push(acc); acc += vps[i].height + gap; }
-
         let y = 0;
         const renderNext = (i) => {
             if (i >= pages.length) {
                 figState.rendering = false;
                 figApplyZoom();
                 if (figState.cropMode) figEnableCropper();
-                if (startNum && startNum > 1) figScrollToPage(startNum);
                 if (figState.pendingPage !== null) {
                     const p = figState.pendingPage;
                     figState.pendingPage = null;
-                    if (p !== startNum) figScrollToPage(p);
+                    figRenderPdfPage(p);
                 }
                 return;
             }
@@ -3850,18 +3846,8 @@ function figRenderPdfContinuous(startNum) {
         renderNext(0);
     });
 
-    document.getElementById('fig-cur-page').textContent = total > 1 ? ('1\u2013' + total) : '1';
+    document.getElementById('fig-cur-page').textContent = last > startNum ? (startNum + '\u2013' + last) : String(startNum);
     figUpdateSourceNav();
-}
-
-function figScrollToPage(num) {
-    const scroll = document.getElementById('fig-pdf-scroll');
-    const canvas = document.getElementById('fig-pdf-canvas');
-    if (!scroll || !canvas || !figState.pageOffsets) return;
-    const off = figState.pageOffsets[num - 1] || 0;
-    const dispScale = (canvas.clientHeight || canvas.height) / canvas.height;
-    scroll.scrollTop = off * dispScale;
-    document.getElementById('fig-cur-page').textContent = figState.pdfDoc ? ('1\u2013' + figState.pdfDoc.numPages) : String(num);
 }
 
 // Render an uploaded image onto the same canvas the cropper uses. The canvas
@@ -4003,21 +3989,12 @@ function figQueuePdfPage(num) {
 
 (function wireFigPdfNav() {
     document.getElementById('fig-prev-page').addEventListener('click', () => {
-        if (figState.continuous) {
-            if (figState.pageNum > 1) { figState.pageNum--; figScrollToPage(figState.pageNum); }
-            return;
-        }
         if (figState.pageNum > 1) { figState.pageNum--; figQueuePdfPage(figState.pageNum); }
     });
     document.getElementById('fig-next-page').addEventListener('click', () => {
-        if (figState.continuous) {
-            if (figState.pdfDoc && figState.pageNum < figState.pdfDoc.numPages) {
-                figState.pageNum++; figScrollToPage(figState.pageNum);
-            }
-            return;
-        }
+        const step = 1;
         if (figState.pdfDoc && figState.pageNum < figState.pdfDoc.numPages) {
-            figState.pageNum = Math.min(figState.pdfDoc.numPages, figState.pageNum + 1);
+            figState.pageNum = Math.min(figState.pdfDoc.numPages, figState.pageNum + step);
             figQueuePdfPage(figState.pageNum);
         }
     });
@@ -6791,7 +6768,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v2.10.0 (continuous PDF scroll — whole document start-to-end on one canvas, both tabs) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v2.9.1 (extractor: keep options out of question field; ignore tick/cross/handwriting artifacts) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -7846,12 +7823,10 @@ function qxRenderPdfPage(num) {
     if (cp) cp.textContent = num;
 }
 
-// Continuous mode: render the ENTIRE document — every page stacked
-// vertically onto ONE tall canvas — so you can scroll from start to end and
-// crop a selection that spans any page break. Pages are drawn progressively
-// (top-to-bottom) so the view stays responsive on large PDFs; a dashed line
-// marks each page boundary. Page offsets are recorded in qxState.pageOffsets
-// so the Prev/Next buttons scroll to a page instead of re-rendering.
+// Continuous mode: render page `startNum` and the following pages stacked
+// vertically onto ONE tall canvas, so a single crop selection can span a
+// page break. A thin dashed separator marks each page boundary. The number
+// of pages stacked is qxState.contSpan (default 2 — current + next).
 function qxRenderPdfContinuous(startNum) {
     if (!qxState.pdfDoc) return;
     qxState.srcType = 'pdf';
@@ -7862,15 +7837,18 @@ function qxRenderPdfContinuous(startNum) {
     const containerWidth = Math.max(scroll.clientWidth - 4, 200);
     const RASTER = 2.5;
     const total = qxState.pdfDoc.numPages;
+    const span = Math.max(1, qxState.contSpan || 2);
+    const last = Math.min(total, startNum + span - 1);
     const nums = [];
-    for (let n = 1; n <= total; n++) nums.push(n);   // ALWAYS full document
+    for (let n = startNum; n <= last; n++) nums.push(n);
 
     Promise.all(nums.map(n => qxState.pdfDoc.getPage(n))).then(pages => {
+        // Uniform fit-scale from the widest page so columns line up.
         let maxUnscaledW = 0;
         pages.forEach(pg => { maxUnscaledW = Math.max(maxUnscaledW, pg.getViewport({ scale: 1 }).width); });
         const fitScale = containerWidth / maxUnscaledW;
         const vps = pages.map(pg => pg.getViewport({ scale: fitScale * RASTER }));
-        const gap = Math.round(14 * RASTER);
+        const gap = Math.round(14 * RASTER);   // visual gap between pages
         const totalW = Math.max.apply(null, vps.map(v => v.width));
         const totalH = vps.reduce((s, v) => s + v.height, 0) + gap * (vps.length - 1);
         canvas.width = totalW;
@@ -7881,23 +7859,17 @@ function qxRenderPdfContinuous(startNum) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, totalW, totalH);
 
-        // Record each page's top offset (canvas px) for nav scrolling.
-        qxState.pageOffsets = [];
-        let acc = 0;
-        for (let i = 0; i < vps.length; i++) { qxState.pageOffsets.push(acc); acc += vps[i].height + gap; }
-
+        // Render each page sequentially at its vertical offset.
         let y = 0;
         const renderNext = (i) => {
             if (i >= pages.length) {
                 qxState.rendering = false;
                 qxApplyZoom();
                 qxEnableCropper();
-                // After first full render, jump to the requested start page.
-                if (startNum && startNum > 1) qxScrollToPage(startNum);
                 if (qxState.pendingPage !== null) {
                     const p = qxState.pendingPage;
                     qxState.pendingPage = null;
-                    if (p !== startNum) qxScrollToPage(p);
+                    qxRenderPdfPage(p);
                 }
                 return;
             }
@@ -7906,6 +7878,7 @@ function qxRenderPdfContinuous(startNum) {
             ctx.translate(0, y);
             pages[i].render({ canvasContext: ctx, viewport: vp }).promise.then(() => {
                 ctx.restore();
+                // dashed page-boundary separator (except after the last page)
                 if (i < pages.length - 1) {
                     const sepY = y + vp.height + gap / 2;
                     ctx.save();
@@ -7923,23 +7896,7 @@ function qxRenderPdfContinuous(startNum) {
     });
 
     const cp = document.getElementById('qx-cur-page');
-    if (cp) cp.textContent = total > 1 ? ('1\u2013' + total) : '1';
-}
-
-// Scroll the extractor viewport to a given page's top (continuous mode).
-function qxScrollToPage(num) {
-    const scroll = document.getElementById('qx-pdf-scroll');
-    const canvas = document.getElementById('qx-canvas');
-    if (!scroll || !canvas || !qxState.pageOffsets || !qxState.pageOffsets[num - 1] && num > 1) {
-        if (!qxState.pageOffsets) return;
-    }
-    const RASTER = 2.5;
-    const off = (qxState.pageOffsets && qxState.pageOffsets[num - 1]) || 0;
-    // canvas px → on-screen px (canvas is RASTER× fit, then scaled by zoom)
-    const dispScale = (canvas.clientHeight || canvas.height) / canvas.height;
-    scroll.scrollTop = off * dispScale;
-    const cp = document.getElementById('qx-cur-page');
-    if (cp) cp.textContent = qxState.pdfDoc ? ('1\u2013' + qxState.pdfDoc.numPages) : String(num);
+    if (cp) cp.textContent = last > startNum ? (startNum + '\u2013' + last) : String(startNum);
 }
 
 function qxRenderImage(file) {
@@ -8618,28 +8575,19 @@ async function qxExportBank() {
         });
 
         document.getElementById('qx-prev-page').addEventListener('click', () => {
-            if (qxState.continuous) {
-                if (qxState.pageNum > 1) { qxState.pageNum--; qxScrollToPage(qxState.pageNum); }
-                return;
-            }
             if (qxState.pageNum > 1) { qxState.pageNum--; qxQueuePage(qxState.pageNum); }
         });
         document.getElementById('qx-next-page').addEventListener('click', () => {
-            if (qxState.continuous) {
-                if (qxState.pdfDoc && qxState.pageNum < qxState.pdfDoc.numPages) {
-                    qxState.pageNum++; qxScrollToPage(qxState.pageNum);
-                }
-                return;
-            }
+            const step = 1;
             if (qxState.pdfDoc && qxState.pageNum < qxState.pdfDoc.numPages) {
-                qxState.pageNum = Math.min(qxState.pdfDoc.numPages, qxState.pageNum + 1);
+                qxState.pageNum = Math.min(qxState.pdfDoc.numPages, qxState.pageNum + step);
                 qxQueuePage(qxState.pageNum);
             }
         });
         const qxContToggle = document.getElementById('qx-continuous');
         if (qxContToggle) qxContToggle.addEventListener('change', () => {
             qxState.continuous = !!qxContToggle.checked;
-            if (qxState.pdfDoc) qxQueuePage(qxState.pageNum);   // re-render in the new mode
+            if (qxState.pdfDoc) qxQueuePage(qxState.pageNum);   // re-render current page in the new mode
         });
         document.getElementById('qx-zoom-in').addEventListener('click', () => { qxState.scale = Math.min(qxState.scale + 0.25, 6); qxApplyZoom(); });
         document.getElementById('qx-zoom-out').addEventListener('click', () => { qxState.scale = Math.max(qxState.scale - 0.25, 0.25); qxApplyZoom(); });
