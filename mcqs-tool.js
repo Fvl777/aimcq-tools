@@ -609,6 +609,9 @@
                         <button type="button" class="fig-nav-btn" id="fig-prev-page">&laquo; Prev</button>
                         <span>Page <b id="fig-cur-page">1</b> / <b id="fig-total-pages">--</b></span>
                         <button type="button" class="fig-nav-btn" id="fig-next-page">Next &raquo;</button>
+                        <label class="fig-nav-btn cursor-pointer flex items-center gap-1" id="fig-cont-label" title="Show this page and the next together on one scroll, so you can crop a figure/question that continues onto the next page">
+                            <input type="checkbox" id="fig-continuous" class="accent-indigo-600 w-3 h-3"> Span pages
+                        </label>
                         <span class="fig-nav-sep"></span>
                         <span class="ml-1">Zoom</span>
                         <button type="button" class="fig-nav-btn" id="fig-zoom-out" title="Zoom out">&minus;</button>
@@ -866,6 +869,9 @@
                         <button type="button" class="fig-nav-btn" id="qx-prev-page">&laquo; Prev</button>
                         <span>Page <b id="qx-cur-page">1</b> / <b id="qx-total-pages">--</b></span>
                         <button type="button" class="fig-nav-btn" id="qx-next-page">Next &raquo;</button>
+                        <label class="fig-nav-btn cursor-pointer flex items-center gap-1" id="qx-cont-label" title="Show this page and the next together on one scroll, so you can crop a question that continues onto the next page">
+                            <input type="checkbox" id="qx-continuous" class="accent-rose-600 w-3 h-3"> Span pages
+                        </label>
                         <span class="fig-nav-sep"></span>
                         <span class="ml-1">Zoom</span>
                         <button type="button" class="fig-nav-btn" id="qx-zoom-out" title="Zoom out">&minus;</button>
