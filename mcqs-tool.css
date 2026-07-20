@@ -1383,3 +1383,9 @@
 .re-compose blockquote, .re-preview-area blockquote {
     border-left: 3px solid #c7d2fe; margin: 8px 0; padding: 4px 12px; color: #4b5563; background: #f8fafc;
 }
+
+/* ===== AI-extracted figure box (extractor review) ===== */
+.qx-figure-img {
+    max-width: 280px; max-height: 220px; display: block;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 4px;
+}
