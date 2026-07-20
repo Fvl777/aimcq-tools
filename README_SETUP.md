@@ -204,17 +204,9 @@ exam papers. Workflow:
    Figure Updater later), solves it if the paper doesn't mark the answer,
    and drafts an explanation (no option-letter references). Output language
    is selectable: Auto-detect / English / Hindi / Bilingual (EN + HI).
-4. **Review in Preview / Editor mode.** After extraction the question opens
-   in **Preview mode** by default — rendered exactly as students will see
-   it in the quiz frontend: formatted question text with KaTeX math,
-   lettered option cards with the correct one highlighted (✓), and the
-   explanation panel; bilingual questions show both language sections. A
-   **Preview | Editor** toggle at the top switches to **Editor mode** with
-   the editable fields — question, options (add/remove, pick the correct
-   one), explanation, Hindi side for bilingual. Edits are never lost when
-   switching: Preview re-reads the current field values every time it
-   opens, so you can flip back and forth to check how changes render, then
-   **Save to Question Bank** from either mode.
+4. **Review & edit** every field — question, options (add/remove, pick the
+   correct one), explanation, Hindi side for bilingual — then
+   **Save to Question Bank**.
 5. Repeat for each question. Questions are saved into **subject
    libraries**: pick the target library (e.g. Physics, History, Maths)
    right next to the Save button, or create a new one with the **+**
