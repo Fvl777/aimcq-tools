@@ -157,12 +157,50 @@ manual step inside **Quick Crop & Upload**:
 4. Use the resulting URL through the tab's normal figure-slot workflow to
    write it into the target question(s).
 
+The **AI figure generator toggle also applies to every figure slot's
+Crop & Set** — the Question Figure slot and all four Option A/B/C/D slots.
+With it on, clicking **Crop & Set** on any slot sends that slot's crop to
+the image model, reproduces only the figure, and sets the generated image
+into the slot (marked with a small **AI** badge); **Apply Figures** then
+uploads it to GitHub + jsDelivr exactly like a manual crop. This makes it
+easy to AI-generate figures for questions whose *options themselves* are
+figures (e.g. four graph options). With the toggle off, Crop & Set stores
+the raw crop at its exact pixel dimensions as before. If generation fails
+(no key / model error) the slot is left untouched with a clear message.
+
 The AI call uses a Gemini API key from the **Question Extractor key pool**
 (with the same 24 h limit rotation), falling back to the **Question
 Editor** AI key; if neither is set it tells you. Uploading uses this tab's
 **Image Hosting (GitHub)** settings. This keeps figure generation fully
 manual and separate from question extraction — the Question Extractor no
 longer generates figures itself.
+
+---
+
+## Match-the-list & table questions
+
+The Question Extractor now handles **match-the-list / match-the-columns**
+questions (List-I / List-II, Column A / Column B, "Match the following")
+and any question that **already contains a table**:
+
+- The matched lists are rendered as a clean HTML `<table>` inside the
+  question, using the lists' own headings for the two columns.
+- **Each list item stays whole in one cell, with its own label** — e.g.
+  `A. Kudankulam` in one cell and `1. Karnataka` in the adjacent cell on
+  the same row. The A./B./C./D. and 1./2./3./4. markers are **not** split
+  into separate columns, and no extra marker columns are created.
+- One matched pair per row, in the printed order; unequal lists leave the
+  extra cells empty.
+- The four answer options remain compact code strings
+  (e.g. `A-2, B-4, C-3, D-1`), not tables.
+- Existing tables (including truth tables) are reproduced faithfully with
+  the same rows/columns rather than flattened into lines.
+
+Tables use minimal clean HTML (`<table>/<thead>/<tbody>/<tr>/<th>/<td>`),
+render correctly in the review Preview, the rich editors, and the quiz
+frontends, and survive the HTML-source view with proper indentation. In
+DeepSeek mode the vision step transcribes tables as Markdown so the
+structure is preserved before DeepSeek rebuilds the HTML table.
 
 ---
 
