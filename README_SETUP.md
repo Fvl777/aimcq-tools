@@ -218,7 +218,14 @@ exam papers. Workflow:
    superscript, link/image/table, left/centre/right/justify alignment,
    numbered & bulleted lists, remove formatting), plus Compose /
    HTML-source / live-preview tabs and the ∑ LaTeX helper for inserting
-   math enclosers. The toolbar is one shared component, so the interface
+   math enclosers. The **HTML view is Blogger-like too**: a light white
+   theme (no dark code background) with readable syntax colours, and the
+   source is shown **well-structured** — block tags (`<p>`, `<ul>`,
+   `<table>`, headings…) each on their own line with 2-space nesting
+   indentation, one line per `<br>`, and short leaf elements like
+   `<li>text</li>` kept compact on a single line. `<br>` line structure
+   and toolbar-applied `<span style>` colours/fonts are preserved in the
+   source (only bare editing wrappers and `&nbsp;` are normalised away). The toolbar is one shared component, so the interface
    is exactly identical in the Question Editor modal and the Extractor — while options stay as
    quick inline inputs (add/remove, radio for the correct one), with a
    full Hindi editor set for bilingual questions. Edits are never lost when
