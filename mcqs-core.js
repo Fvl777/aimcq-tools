@@ -1835,6 +1835,10 @@ function buildRichEditor(wrap) {
         'en-explanation': 'Explanation / solution steps in English (optional)…',
         'hi-question':    'प्रश्न हिन्दी में…',
         'hi-explanation': 'व्याख्या / हल के चरण हिन्दी में (वैकल्पिक)…',
+        'qx-en-question':    'Extracted question text…',
+        'qx-en-explanation': 'Explanation / solution steps…',
+        'qx-hi-question':    'निकाला गया प्रश्न…',
+        'qx-hi-explanation': 'व्याख्या / हल के चरण…',
     };
     const placeholder = placeholders[field] || '';
     const savedH = (reRegistry[field] && reRegistry[field].height) || RE_DEFAULT_HEIGHT;
@@ -1880,46 +1884,92 @@ function buildRichEditor(wrap) {
           </div>
         </div>
       </div>
-      <div class="re-toolbar">
-        <select class="re-heading-select" title="Paragraph / Heading">
+      <div class="re-toolbar re-toolbar-blogger">
+        <button type="button" class="re-tool-btn" data-cmd="undo" title="Undo (Ctrl+Z)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 015 5v1a5 5 0 01-5 5h-4"/></svg>
+        </button>
+        <button type="button" class="re-tool-btn" data-cmd="redo" title="Redo (Ctrl+Y)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 00-5 5v1a5 5 0 005 5h4"/></svg>
+        </button>
+        <div class="re-tool-sep"></div>
+        <select class="re-font-select re-bar-select" title="Font">
+          <option value="">Font</option>
+          <option value="Arial, sans-serif">Arial</option>
+          <option value="Courier New, monospace">Courier</option>
+          <option value="Georgia, serif">Georgia</option>
+          <option value="Helvetica, sans-serif">Helvetica</option>
+          <option value="Times New Roman, serif">Times</option>
+          <option value="Trebuchet MS, sans-serif">Trebuchet</option>
+          <option value="Verdana, sans-serif">Verdana</option>
+        </select>
+        <select class="re-size-select re-bar-select" title="Font size">
+          <option value="">Size</option>
+          <option value="1">Smallest</option>
+          <option value="2">Small</option>
+          <option value="3">Normal</option>
+          <option value="5">Large</option>
+          <option value="7">Largest</option>
+        </select>
+        <select class="re-heading-select re-bar-select" title="Paragraph / Heading">
           <option value="div">Normal</option>
-          <option value="h1">Heading 1</option>
-          <option value="h2">Heading 2</option>
-          <option value="h3">Heading 3</option>
-          <option value="h4">Heading 4</option>
-          <option value="h5">Heading 5</option>
+          <option value="h2">Heading</option>
+          <option value="h3">Subheading</option>
+          <option value="h4">Minor heading</option>
+          <option value="p">Paragraph</option>
+          <option value="blockquote">Quote</option>
         </select>
         <div class="re-tool-sep"></div>
-        <span class="re-tool-label">FORMAT</span>
         <button type="button" class="re-tool-btn" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
         <button type="button" class="re-tool-btn" data-cmd="italic" title="Italic (Ctrl+I)"><i style="font-style:italic">I</i></button>
         <button type="button" class="re-tool-btn" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
         <button type="button" class="re-tool-btn" data-cmd="strikeThrough" title="Strikethrough"><s>S</s></button>
+        <div class="re-color-wrap">
+          <button type="button" class="re-tool-btn re-color-btn re-fore-btn" title="Text colour">
+            <span class="re-color-A">A</span><span class="re-color-bar re-fore-bar" style="background:#dc2626"></span>
+          </button>
+          <div class="re-color-dropdown re-fore-drop hidden"></div>
+        </div>
+        <div class="re-color-wrap">
+          <button type="button" class="re-tool-btn re-color-btn re-back-btn" title="Text background colour">
+            <span class="re-color-A" style="background:#fde047;border-radius:2px;padding:0 2px;">A</span><span class="re-color-bar re-back-bar" style="background:#fde047"></span>
+          </button>
+          <div class="re-color-dropdown re-back-drop hidden"></div>
+        </div>
         <div class="re-tool-sep"></div>
-        <span class="re-tool-label">SCRIPT</span>
         <button type="button" class="re-tool-btn" data-cmd="superscript" title="Superscript" style="font-size:10px;letter-spacing:-0.5px">X²</button>
         <button type="button" class="re-tool-btn" data-cmd="subscript" title="Subscript" style="font-size:10px;letter-spacing:-0.5px">X₂</button>
         <div class="re-tool-sep"></div>
-        <span class="re-tool-label">LIST</span>
-        <button type="button" class="re-tool-btn" data-cmd="insertUnorderedList" title="Bullet list">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1.5" fill="currentColor"/><circle cx="4" cy="12" r="1.5" fill="currentColor"/><circle cx="4" cy="18" r="1.5" fill="currentColor"/></svg>
-        </button>
-        <button type="button" class="re-tool-btn" data-cmd="insertOrderedList" title="Numbered list">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4" stroke-linecap="round"/><path d="M4 10h2" stroke-linecap="round"/><path d="M4 14h1.5a.5.5 0 010 1H4a.5.5 0 000 1h2" stroke-linecap="round"/></svg>
-        </button>
-        <div class="re-tool-sep"></div>
-        <span class="re-tool-label">INSERT</span>
         <button type="button" class="re-tool-btn re-tool-link" title="Insert / edit link">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-        </button>
-        <button type="button" class="re-tool-btn re-tool-table" title="Insert table">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
         </button>
         <button type="button" class="re-tool-btn re-tool-image" title="Insert image URL">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
         </button>
+        <button type="button" class="re-tool-btn re-tool-table" title="Insert table">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+        </button>
         <div class="re-tool-sep"></div>
-        <button type="button" class="re-tool-btn" data-cmd="removeFormat" title="Clear formatting" style="font-size:10px">
+        <button type="button" class="re-tool-btn" data-cmd="justifyLeft" title="Align left">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="14" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></svg>
+        </button>
+        <button type="button" class="re-tool-btn" data-cmd="justifyCenter" title="Align centre">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+        </button>
+        <button type="button" class="re-tool-btn" data-cmd="justifyRight" title="Align right">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="6" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <button type="button" class="re-tool-btn" data-cmd="justifyFull" title="Justify">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <div class="re-tool-sep"></div>
+        <button type="button" class="re-tool-btn" data-cmd="insertOrderedList" title="Numbered list">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4" stroke-linecap="round"/><path d="M4 10h2" stroke-linecap="round"/><path d="M4 14h1.5a.5.5 0 010 1H4a.5.5 0 000 1h2" stroke-linecap="round"/></svg>
+        </button>
+        <button type="button" class="re-tool-btn" data-cmd="insertUnorderedList" title="Bulleted list">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1.5" fill="currentColor"/><circle cx="4" cy="12" r="1.5" fill="currentColor"/><circle cx="4" cy="18" r="1.5" fill="currentColor"/></svg>
+        </button>
+        <div class="re-tool-sep"></div>
+        <button type="button" class="re-tool-btn" data-cmd="removeFormat" title="Remove formatting">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 12h12M4 6h10M8 18h8"/><line x1="19" y1="5" x2="5" y2="19" stroke="#ef4444" stroke-width="2"/></svg>
         </button>
       </div>
@@ -1955,12 +2005,74 @@ function buildRichEditor(wrap) {
         tab.addEventListener('click', () => switchReMode(field, tab.getAttribute('data-mode'), wrap));
     });
 
-    // --- Heading select ---
+    // --- Heading / paragraph select (includes Quote like Blogger) ---
     const headingSelect = toolbar.querySelector('.re-heading-select');
     headingSelect.addEventListener('change', () => {
         compose.focus();
         document.execCommand('formatBlock', false, headingSelect.value);
         updateToolbarState(toolbar, compose);
+    });
+
+    // --- Font family & size (Blogger-style) ---
+    const fontSelect = toolbar.querySelector('.re-font-select');
+    if (fontSelect) fontSelect.addEventListener('change', () => {
+        if (!fontSelect.value) return;
+        compose.focus();
+        try { document.execCommand('styleWithCSS', false, true); } catch (e) {}
+        document.execCommand('fontName', false, fontSelect.value);
+        fontSelect.value = '';
+    });
+    const sizeSelect = toolbar.querySelector('.re-size-select');
+    if (sizeSelect) sizeSelect.addEventListener('change', () => {
+        if (!sizeSelect.value) return;
+        compose.focus();
+        document.execCommand('fontSize', false, sizeSelect.value);
+        sizeSelect.value = '';
+    });
+
+    // --- Text colour / highlight colour (Blogger-style palette grid) ---
+    const RE_PALETTE = [
+        '#000000','#444444','#666666','#999999','#cccccc','#eeeeee','#f3f3f3','#ffffff',
+        '#ff0000','#ff9900','#ffff00','#00ff00','#00ffff','#0000ff','#9900ff','#ff00ff',
+        '#e06666','#f6b26b','#ffd966','#93c47d','#76a5af','#6fa8dc','#8e7cc3','#c27ba0',
+        '#cc0000','#e69138','#f1c232','#6aa84f','#45818e','#3d85c6','#674ea7','#a64d79',
+        '#990000','#b45309','#bf9000','#38761d','#134f5c','#0b5394','#351c75','#741b47',
+    ];
+    function wireColorPicker(btnSel, dropSel, barSel, cmd) {
+        const btn = toolbar.querySelector(btnSel);
+        const drop = toolbar.querySelector(dropSel);
+        const bar = toolbar.querySelector(barSel);
+        if (!btn || !drop) return;
+        drop.innerHTML = RE_PALETTE.map(c =>
+            `<button type="button" class="re-swatch" data-color="${c}" style="background:${c}" title="${c}"></button>`).join('')
+            + `<div class="re-swatch-footer"><input type="color" class="re-swatch-custom" title="Custom colour"><span>Custom</span>`
+            + (cmd !== 'foreColor' ? `<button type="button" class="re-swatch-none">None</button>` : '') + `</div>`;
+        const apply = (color) => {
+            drop.classList.add('hidden');
+            compose.focus();
+            try { document.execCommand('styleWithCSS', false, true); } catch (e) {}
+            document.execCommand(cmd, false, color);
+            if (bar) bar.style.background = color === 'transparent' ? '#e5e7eb' : color;
+            updateToolbarState(toolbar, compose);
+        };
+        btn.addEventListener('mousedown', e => {
+            e.preventDefault();
+            document.querySelectorAll('.re-color-dropdown').forEach(d => { if (d !== drop) d.classList.add('hidden'); });
+            drop.classList.toggle('hidden');
+        });
+        drop.querySelectorAll('.re-swatch').forEach(sw =>
+            sw.addEventListener('mousedown', e => { e.preventDefault(); apply(sw.getAttribute('data-color')); }));
+        const custom = drop.querySelector('.re-swatch-custom');
+        if (custom) custom.addEventListener('change', () => apply(custom.value));
+        const none = drop.querySelector('.re-swatch-none');
+        if (none) none.addEventListener('mousedown', e => { e.preventDefault(); apply('transparent'); });
+    }
+    wireColorPicker('.re-fore-btn', '.re-fore-drop', '.re-fore-bar', 'foreColor');
+    wireColorPicker('.re-back-btn', '.re-back-drop', '.re-back-bar', 'hiliteColor');
+    document.addEventListener('click', e => {
+        if (!e.target.closest || !e.target.closest('.re-color-wrap')) {
+            wrap.querySelectorAll('.re-color-dropdown').forEach(d => d.classList.add('hidden'));
+        }
     });
 
     // --- Toolbar commands ---
@@ -2410,7 +2522,10 @@ function updateToolbarState(toolbar, compose) {
     ['bold','italic','underline','strikeThrough','superscript','subscript',
      'insertUnorderedList','insertOrderedList'].forEach(cmd => {
         const btn = toolbar.querySelector(`[data-cmd="${cmd}"]`);
-        if (btn) btn.classList.toggle('active', document.queryCommandState(cmd));
+        if (!btn) return;
+        let on = false;
+        try { on = document.queryCommandState && document.queryCommandState(cmd); } catch (e) {}
+        btn.classList.toggle('active', !!on);
     });
     // Sync heading select
     const sel = toolbar.querySelector('.re-heading-select');
@@ -6429,7 +6544,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v2.1.0 (extractor review: Preview/Editor mode toggle — student-facing rendered preview) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v2.3.0 (Blogger-style rich editor toolbar — identical in Question Editor & Extractor) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -7727,15 +7842,16 @@ function qxFieldsHtml(prefix, data, heading) {
             <button type="button" class="qx-opt-del" title="Remove this option"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
         </div>`;
     });
+    const lang = prefix === 'hi' ? ' data-lang="hi"' : '';
     return `
     ${heading ? `<p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">${heading}</p>` : ''}
     <label class="qx-lbl">Question</label>
-    <textarea id="qx-${prefix}-question" class="qx-ta" rows="3">${qxEsc(data.question)}</textarea>
+    <div class="rich-editor-wrap" data-field="qx-${prefix}-question"${lang}></div>
     <label class="qx-lbl mt-3">Options <span class="font-normal normal-case text-gray-400">(radio = correct answer)</span></label>
     <div id="qx-${prefix}-opts">${opts}</div>
     <button type="button" class="qx-add-opt" data-prefix="${prefix}"><i data-lucide="plus" class="w-3.5 h-3.5"></i> Add option</button>
     <label class="qx-lbl mt-3">Explanation</label>
-    <textarea id="qx-${prefix}-explanation" class="qx-ta" rows="4">${qxEsc(data.explanation)}</textarea>`;
+    <div class="rich-editor-wrap" data-field="qx-${prefix}-explanation"${lang}></div>`;
 }
 
 function qxRenderReview() {
@@ -7764,6 +7880,17 @@ function qxRenderReview() {
     } else {
         fieldsHi.classList.add('hidden');
         fieldsHi.innerHTML = '';
+    }
+
+    // Rich editors for question & explanation (same editor as the Question
+    // Editor tab: formatting toolbar, HTML source view, live KaTeX preview).
+    review.querySelectorAll('#qx-fields .rich-editor-wrap, #qx-fields-hi .rich-editor-wrap')
+        .forEach(w => buildRichEditor(w));
+    setReValue('qx-en-question', r.question || '');
+    setReValue('qx-en-explanation', r.explanation || '');
+    if (r.hi) {
+        setReValue('qx-hi-question', r.hi.question || '');
+        setReValue('qx-hi-explanation', r.hi.explanation || '');
     }
 
     // Wire option add/remove (delegated per render).
@@ -7859,8 +7986,7 @@ function qxBuildPreviewHtml(en, hi) {
 }
 
 function qxCollectFields(prefix) {
-    const qEl = document.getElementById(`qx-${prefix}-question`);
-    if (!qEl) return null;
+    if (!reRegistry[`qx-${prefix}-question`]) return null;   // fields not built
     const rows = document.querySelectorAll(`#qx-${prefix}-opts .qx-opt-row`);
     const options = [];
     let correct = 0;
@@ -7869,10 +7995,10 @@ function qxCollectFields(prefix) {
         if (row.querySelector('input[type=radio]').checked) correct = i;
     });
     return {
-        question: qEl.value.trim(),
+        question: (getReValue(`qx-${prefix}-question`) || '').trim(),
         options,
         correct,
-        explanation: (document.getElementById(`qx-${prefix}-explanation`) || {}).value || '',
+        explanation: getReValue(`qx-${prefix}-explanation`) || '',
     };
 }
 
