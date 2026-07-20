@@ -336,18 +336,18 @@
         .re-compose h4 { font-size: 1em; font-weight: 600; margin: 4px 0 2px; line-height: 1.3; text-transform: uppercase; letter-spacing: 0.04em; }
         .re-compose h5 { font-size: 0.875em; font-weight: 600; margin: 4px 0 2px; line-height: 1.3; color: #6b7280; }
 
-        /* HTML source view */
+        /* HTML source view — light, Blogger-like */
         .re-html-wrap {
             height: 100%; min-height: 120px; position: relative;
-            background: #0f1117; display: flex; flex-direction: column;
+            background: #ffffff; display: flex; flex-direction: column;
         }
         .re-html-gutter {
             position: absolute; left: 0; top: 0; bottom: 0; width: 40px;
-            background: #1a1d27; border-right: 1px solid #2d3149;
+            background: #f8fafc; border-right: 1px solid #e5e7eb;
             display: flex; flex-direction: column; padding-top: 12px;
             pointer-events: none; overflow: hidden; z-index: 1;
             font-family: 'Courier New', monospace; font-size: 11.5px;
-            line-height: 1.65; color: #4b5563; text-align: right;
+            line-height: 1.65; color: #b0b7c3; text-align: right;
             padding-right: 8px; box-sizing: border-box;
         }
         .re-html-scroll {
@@ -357,25 +357,25 @@
         .re-html-code {
             font-family: 'Fira Mono', 'Cascadia Code', 'Courier New', monospace;
             font-size: 12.5px; line-height: 1.65; white-space: pre-wrap;
-            word-break: break-all; outline: none; color: #e2e8f0;
-            min-height: 100%; caret-color: #f8fafc;
+            word-break: break-word; outline: none; color: #1f2937;
+            min-height: 100%; caret-color: #111827;
         }
         .re-html-code:empty:before {
-            content: attr(data-placeholder); color: #4b5563; font-style: italic;
+            content: attr(data-placeholder); color: #9ca3af; font-style: italic;
         }
-        /* Syntax colors */
-        .hl-tag    { color: #7dd3fc; }   /* tag names  */
-        .hl-attr   { color: #86efac; }   /* attributes */
-        .hl-val    { color: #fca5a5; }   /* attr values */
-        .hl-eq     { color: #94a3b8; }   /* = sign     */
-        .hl-punct  { color: #64748b; }   /* < > / brackets */
-        .hl-text   { color: #e2e8f0; }   /* plain text */
-        .hl-entity { color: #fcd34d; }   /* &amp; etc  */
-        .hl-comment{ color: #4b5563; font-style: italic; }
+        /* Syntax colors — light theme */
+        .hl-tag    { color: #1a56db; font-weight: 600; }   /* tag names  */
+        .hl-attr   { color: #b45309; }   /* attributes */
+        .hl-val    { color: #047857; }   /* attr values */
+        .hl-eq     { color: #6b7280; }   /* = sign     */
+        .hl-punct  { color: #94a3b8; }   /* < > / brackets */
+        .hl-text   { color: #111827; }   /* plain text */
+        .hl-entity { color: #9333ea; }   /* &amp; etc  */
+        .hl-comment{ color: #9ca3af; font-style: italic; }
 
         /* Compose→HTML selection highlight */
         .hl-compose-sel {
-            background: #fbbf24; color: #1e1e2e !important;
+            background: #fde68a; color: #1e1e2e !important;
             border-radius: 3px; padding: 0 2px;
             box-shadow: 0 0 0 1.5px #f59e0b;
             font-style: normal !important;
