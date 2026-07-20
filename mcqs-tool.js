@@ -913,10 +913,14 @@
                             <option value="concise">Concise</option>
                         </select>
                     </div>
+                    <button id="qx-add-crop-btn" class="flex-shrink-0 bg-white hover:bg-rose-50 border border-rose-200 text-rose-700 font-bold py-2.5 px-4 rounded-xl text-sm flex items-center justify-center gap-2 transition-colors shadow-sm" title="Bank the current selection and keep going — turn the page or select another region (e.g. the rest of the question, or the same question in another language), then click Extract to combine them all into ONE question.">
+                        <i data-lucide="plus-square" class="w-4 h-4"></i> Add crop
+                    </button>
                     <button id="qx-extract-btn" class="flex-1 min-w-[220px] bg-rose-600 hover:bg-rose-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold py-2.5 px-5 rounded-xl text-sm flex items-center justify-center gap-2 transition-colors shadow-sm">
                         <i data-lucide="sparkles" class="w-4 h-4"></i> <span id="qx-extract-label">Extract Question with AI</span>
                     </button>
                 </div>
+                <div id="qx-crop-queue" class="hidden mt-3"><!-- queued multi-part crops (rendered by JS) --></div>
             </div>
 
             <!-- Step 3: Review -->
