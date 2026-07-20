@@ -6622,7 +6622,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v2.3.1 (Blogger-style HTML view — structured indented source, light theme) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v2.5.0 (AI figure extraction — image model reproduces question figures, GitHub + jsDelivr on save) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -7283,6 +7283,10 @@ function qeAiApply(mode) {
             const customEl = document.getElementById('qx-vision-model-custom');
             if (customEl) customEl.classList.toggle('hidden', e.target.value !== 'custom');
         }
+        if (e.target && e.target.id === 'qx-figure-model') {
+            const customEl = document.getElementById('qx-figure-model-custom');
+            if (customEl) customEl.classList.toggle('hidden', e.target.value !== 'custom');
+        }
         if (e.target && e.target.id === 'qx-gemini-split') {
             qxPools.gemini.split = !!e.target.checked;
             qxPoolPersist();
@@ -7863,6 +7867,9 @@ async function qxExtract() {
     if (btn) btn.disabled = true;
     if (label) label.textContent = 'Extracting with AI…';
 
+    qxState.figure = null;
+    qxState.lastCropB64 = b64;
+    try { qxFigureUpdateBox(); } catch (e) {}
     try {
         const call = await qxRunExtraction(qxBuildPrompt, langMode, b64, wantSteps, detailLevel);
         const raw = call.text;
@@ -7889,6 +7896,15 @@ async function qxExtract() {
             } : null,
         };
         qxRenderReview();
+        // AI figure extraction: when the question references a figure and the
+        // toggle is on, reproduce it with the image-output model (async — the
+        // review is already usable while the figure generates).
+        try {
+            const wantFigures = !!(document.getElementById('qx-figures') || {}).checked;
+            const hasPlaceholder = FIG_PLACEHOLDER_RE.test(p.question_html || '') ||
+                FIG_PLACEHOLDER_RE.test(p.question_html_hi || '');
+            if (wantFigures && hasPlaceholder) qxRunFigureGen();
+        } catch (e) {}
         showToast('Question extracted', 'Review the fields below, edit if needed, then Save to Question Bank.', 'success');
     } catch (err) {
         showToast('Extraction failed', aiFriendlyError(err), 'error');
@@ -7995,7 +8011,7 @@ function qxRenderReview() {
     review.classList.remove('hidden');
     qxSetReviewMode('preview');   // students-eye view first; Editor is one click away
     lucide.createIcons();
-    review.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    try { review.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
 }
 
 // ---------- preview / editor mode ----------
@@ -8098,6 +8114,16 @@ async function qxSaveToBank() {
 
     const isHiOnly = r.language === 'hi' && !r.hi;
     const hi = r.hi ? qxCollectFields('hi') : null;
+
+    // AI figure: upload to GitHub → jsDelivr and swap the [image here]
+    // placeholder for the standard question-image tag (both languages).
+    if (qxState.figure && (qxState.figure.status === 'ready' || qxState.figure.status === 'uploading')) {
+        const tag = await qxUploadFigureGetTag();
+        if (tag) {
+            en.question = qxInsertFigureTag(en.question, tag);
+            if (hi && hi.question) hi.question = qxInsertFigureTag(hi.question, tag);
+        }
+    }
 
     const meta = {
         _aimcq_options: en.options.filter(o => o !== '').map(t => ({ text: t, image: '' })),
@@ -8225,6 +8251,23 @@ async function qxRenderBank() {
     lucide.createIcons();
 }
 
+// Language of a set of bank records → term language label + code.
+//   all English → English / 01EN;  all Hindi → Hindi / 01HI;
+//   any bilingual question, or a mix of EN and HI → Bilingual / 01ENHI.
+function qxLangTermInfo(recs) {
+    const kinds = new Set(recs.map(r =>
+        r.language === 'bilingual' ? 'bi' : (r.language === 'hi' ? 'hi' : 'en')));
+    if (kinds.has('bi') || (kinds.has('en') && kinds.has('hi'))) return { language: 'English & Hindi', code: '01ENHI' };
+    if (kinds.has('hi')) return { language: 'Hindi', code: '01HI' };
+    return { language: 'English', code: '01EN' };
+}
+
+function qxSlugify(name) {
+    return String(name || '').toLowerCase().trim()
+        .replace(/[^a-z0-9\u0900-\u097F]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'library';
+}
+
 async function qxExportBank() {
     const libs = await qxLibEnsure();
     const sel = qxLibSelection();
@@ -8236,12 +8279,36 @@ async function qxExportBank() {
     scoped.sort((a, b) => (a.id || 0) - (b.id || 0));
     const libName = sel.view === 'all' ? 'all' : ((libs.find(l => l.id === sel.view) || {}).name || 'library');
     const slug = String(libName).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'library';
+
+    // One term per library represented in the export: taxonomy & name are the
+    // library name; language/language_code derived from that library's
+    // questions (01EN / 01HI / 01ENHI). Posts reference their library term
+    // via taxonomies { "<Library Name>": ["<library-slug>"] }.
+    const libIds = [...new Set(scoped.map(r => r.library))];
+    const termByLib = {};
+    const terms = libIds.map(id => {
+        const name = (libs.find(l => l.id === id) || {}).name || 'General';
+        const info = qxLangTermInfo(scoped.filter(r => r.library === id));
+        const term = {
+            taxonomy: name,
+            language: info.language,
+            language_code: info.code,
+            name: name,
+            slug: qxSlugify(name),
+        };
+        termByLib[id] = term;
+        return term;
+    });
+
     const data = {
         version: '1.8.0',
         export_type: 'question_bank',
         library: sel.view === 'all' ? undefined : libName,
-        terms: [],
-        posts: scoped.map(r => r.post),
+        terms: terms,
+        posts: scoped.map(r => {
+            const t = termByLib[r.library];
+            return Object.assign({}, r.post, { taxonomies: { [t.taxonomy]: [t.slug] } });
+        }),
     };
     if (data.library === undefined) delete data.library;
     downloadJSON(data, `question_bank_${slug}_${Date.now()}.json`);
@@ -8291,6 +8358,8 @@ async function qxExportBank() {
         document.getElementById('qx-extract-btn').addEventListener('click', qxExtract);
         document.getElementById('qx-save-btn').addEventListener('click', qxSaveToBank);
         document.getElementById('qx-discard-btn').addEventListener('click', () => {
+            qxState.figure = null;
+            try { qxFigureUpdateBox(); } catch (e) {}
             qxState.result = null;
             document.getElementById('qx-review').classList.add('hidden');
         });
@@ -8311,6 +8380,12 @@ async function qxExportBank() {
             qxRenderBank();
             showToast('Deleted', `${scoped.length} question${scoped.length === 1 ? '' : 's'} removed from ${sel.view === 'all' ? 'all libraries' : 'the library'}.`, 'info');
         });
+
+        // Figure box controls
+        const figRegen = document.getElementById('qx-figure-regen');
+        if (figRegen) figRegen.addEventListener('click', () => { if (qxState.lastCropB64) qxRunFigureGen(); });
+        const figRemove = document.getElementById('qx-figure-remove');
+        if (figRemove) figRemove.addEventListener('click', () => { qxState.figure = null; qxFigureUpdateBox(); });
 
         // Library controls
         const libNew = document.getElementById('qx-lib-new');
@@ -8394,9 +8469,16 @@ const QX_VISION_MODELS = [
 ];
 const QX_VISION_MODEL_DEFAULT = 'gemma-4-31b-it';
 
+const QX_FIGURE_MODELS = [
+    ['gemini-3.1-flash-lite-image', 'gemini-3.1-flash-lite-image (recommended)'],
+    ['custom', 'Custom image model id…'],
+];
+const QX_FIGURE_MODEL_DEFAULT = 'gemini-3.1-flash-lite-image';
+
 let qxPools = {
     provider: 'gemini',
     visionModel: QX_VISION_MODEL_DEFAULT,   // shared image-reading model (Gemma by default)
+    figureModel: QX_FIGURE_MODEL_DEFAULT,   // image-OUTPUT model for figure extraction
     gemini:   { model: 'gemini-2.5-flash', keys: [], split: true },
     deepseek: { model: 'deepseek-v4-flash', keys: [] },
 };
@@ -8429,6 +8511,7 @@ function qxPoolLoad() {
                     || QX_VISION_MODEL_DEFAULT;
                 // Gemini split pipeline (Gemma vision → Gemini text generation).
                 qxPools.gemini.split = (p.gemini && typeof p.gemini.split === 'boolean') ? p.gemini.split : true;
+                qxPools.figureModel = p.figureModel || QX_FIGURE_MODEL_DEFAULT;
             }
         } else {
             // Migrate the old single-provider (Gemini) pool if present.
@@ -8550,6 +8633,18 @@ function qxPoolRenderKeys() {
             visCustom.value = known ? '' : vm;
         }
     }
+    const figSel = document.getElementById('qx-figure-model');
+    const figCustom = document.getElementById('qx-figure-model-custom');
+    if (figSel) {
+        figSel.innerHTML = QX_FIGURE_MODELS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+        const fm = qxPools.figureModel || QX_FIGURE_MODEL_DEFAULT;
+        const knownF = QX_FIGURE_MODELS.some(m => m[0] === fm && m[0] !== 'custom');
+        figSel.value = knownF ? fm : 'custom';
+        if (figCustom) {
+            figCustom.classList.toggle('hidden', knownF);
+            figCustom.value = knownF ? '' : fm;
+        }
+    }
 
     if (!pool.keys.length) {
         list.innerHTML = `<p class="text-xs text-gray-400 py-1">No ${QX_PROVIDERS[provider].label} keys yet — click <b>Add API key</b> to add your first key.</p>`;
@@ -8627,6 +8722,13 @@ function qxPoolSave() {
     }
     const splitBox = document.getElementById('qx-gemini-split');
     if (splitBox) qxPools.gemini.split = !!splitBox.checked;
+    const figSel = document.getElementById('qx-figure-model');
+    const figCustom = document.getElementById('qx-figure-model-custom');
+    if (figSel) {
+        qxPools.figureModel = figSel.value === 'custom'
+            ? (figCustom && figCustom.value.trim()) || QX_FIGURE_MODEL_DEFAULT
+            : figSel.value;
+    }
     pool.keys = pool.keys.filter(k => k.key || k.label);
     qxPoolPersist();
     qxPoolRenderKeys();
@@ -8826,4 +8928,205 @@ async function qxPoolTestKey(id, btn) {
         showToast(`Key "${k.label}" failed`, aiFriendlyError(err), 'error');
     }
     setTimeout(() => { try { qxPoolRenderKeys(); } catch (e) {} }, 4000);
+}
+
+// ============================================================
+// == AI FIGURE EXTRACTION (image-output model + GitHub CDN) ==
+// ============================================================
+// When an extracted question contains an [image here: ...] placeholder and
+// the "AI figures" toggle is on, the crop is sent to an image-OUTPUT Gemini
+// model (default gemini-3.1-flash-lite-image) that reproduces ONLY the
+// figure (graph / circuit / table / diagram) as a clean standalone image.
+// The figure previews in the review panel; on Save it is uploaded to GitHub
+// with the Figure Updater tab's Image Hosting settings and referenced via
+// jsDelivr CDN inside the question, replacing the placeholder with the same
+// <img class="aimcq-question-image"> tag the Figure Updater produces.
+
+const QX_FIGURE_PROMPT =
+    'The attached image is a cropped exam question that contains a figure (diagram, graph, circuit, table, or illustration). ' +
+    'Generate an image that reproduces ONLY that figure as a clean standalone image on a plain white background. ' +
+    'EXCLUDE everything that is not part of the figure itself: the question text, question number, option labels and option text, printed answer markings, and any watermarks or logos. ' +
+    'Reproduce the figure faithfully and completely — same axes and axis labels, curve shapes, circuit components and their values, arrows, table rows/columns, and any text or numbers that belong INSIDE the figure. ' +
+    'Do not add titles, captions, borders, or decorations of your own. ' +
+    'If several separate figures are present, reproduce the main figure that the question body refers to.';
+
+// Gemini request variant that accepts image parts in the RESPONSE.
+async function aiGeminiImageRequest(prompt, opts) {
+    opts = opts || {};
+    const key = aiSanitizeKey(opts.key || aiCfg.key);
+    const model = opts.model || QX_FIGURE_MODEL_DEFAULT;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+    const userParts = [];
+    if (opts.imageB64) {
+        userParts.push({ inline_data: { mime_type: opts.imageMime || 'image/webp', data: opts.imageB64 } });
+    }
+    userParts.push({ text: prompt });
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({
+            contents: [{ role: 'user', parts: userParts }],
+            generationConfig: { responseModalities: ['TEXT', 'IMAGE'], temperature: 0.1 },
+        }),
+    });
+    if (!resp.ok) {
+        let detail = '', reason = '', gstatus = '';
+        try {
+            const j = await resp.json();
+            if (j.error) {
+                detail = j.error.message || '';
+                gstatus = j.error.status || '';
+                (j.error.details || []).forEach(d => { if (d && d.reason && !reason) reason = d.reason; });
+            }
+        } catch (e) {}
+        const err = new Error(detail || `HTTP ${resp.status}`);
+        err.status = resp.status;
+        err.reason = reason || gstatus;
+        throw err;
+    }
+    const data = await resp.json();
+    const parts = (data.candidates && data.candidates[0] && data.candidates[0].content &&
+        data.candidates[0].content.parts) || [];
+    const images = [];
+    let text = '';
+    parts.forEach(p => {
+        const inl = p.inlineData || p.inline_data;
+        if (inl && inl.data) images.push({ mime: inl.mimeType || inl.mime_type || 'image/png', data: inl.data });
+        if (p.text) text += p.text;
+    });
+    return { images, text };
+}
+
+// Failover across the extractor's Gemini key pool (falling back to the
+// Question Editor's key) — same rotation semantics as text calls.
+async function qxGenerateFigureImage(imageB64) {
+    const model = qxPools.figureModel || QX_FIGURE_MODEL_DEFAULT;
+    const opts = { imageB64, imageMime: 'image/webp', model };
+    const candidates = qxPools.gemini.keys.filter(qxKeyActive);
+    if (candidates.length) {
+        for (const k of candidates) {
+            try {
+                const out = await aiGeminiImageRequest(QX_FIGURE_PROMPT, Object.assign({}, opts, { key: k.key }));
+                if (!out.images.length) throw new Error('The image model returned no image' + (out.text ? ' — it said: ' + out.text.slice(0, 160) : '.'));
+                return out.images[0];
+            } catch (err) {
+                if (qxIsLimitError(err)) {
+                    qxPoolMarkLimited(k);
+                    showToast('API limit hit — switching key', `Gemini key "${k.label}" hit its limit (figure model). Trying the next key…`, 'info');
+                    continue;
+                }
+                throw err;
+            }
+        }
+        throw new Error('All Gemini keys hit their limits during figure generation.');
+    }
+    if (typeof aiConfigured === 'function' && aiConfigured()) {
+        const out = await aiGeminiImageRequest(QX_FIGURE_PROMPT, opts);
+        if (!out.images.length) throw new Error('The image model returned no image' + (out.text ? ' — it said: ' + out.text.slice(0, 160) : '.'));
+        return out.images[0];
+    }
+    throw new Error('No Gemini key available for the figure model — add one to the extractor pool.');
+}
+
+// ---------- review-panel figure box ----------
+function qxFigureUpdateBox() {
+    const box = document.getElementById('qx-figure-box');
+    if (!box) return;
+    const f = qxState.figure;
+    const chip = document.getElementById('qx-figure-status');
+    const img = document.getElementById('qx-figure-img');
+    const note = document.getElementById('qx-figure-note');
+    if (!f) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    if (chip) {
+        chip.textContent = f.status === 'generating' ? 'generating…'
+            : f.status === 'ready' ? ('ready · ' + (qxPools.figureModel || QX_FIGURE_MODEL_DEFAULT))
+            : f.status === 'uploading' ? 'uploading to GitHub…'
+            : 'failed';
+        chip.classList.toggle('on', f.status === 'ready');
+        chip.classList.toggle('off', f.status !== 'ready');
+    }
+    if (img) {
+        if (f.dataUrl) { img.src = f.dataUrl; img.classList.remove('hidden'); }
+        else img.classList.add('hidden');
+    }
+    if (note) {
+        const hosted = typeof figState !== 'undefined' && figState.github && figState.github.repo && figState.github.token;
+        note.textContent = f.status === 'error' ? ('Figure generation failed: ' + (f.error || 'unknown error') + ' — you can Regenerate, or save without a figure (the [image here] placeholder stays for the Figure Updater tab).')
+            : f.status === 'generating' ? 'Reproducing the question\'s figure with the image model…'
+            : hosted ? 'On save, this figure is uploaded to GitHub (' + figState.github.repo + ') and inserted into the question via jsDelivr CDN, replacing the [image here] placeholder.'
+            : 'Image Hosting is NOT configured (Figure Updater tab) — on save the question keeps its [image here] placeholder and the figure is not uploaded.';
+    }
+    try { lucide.createIcons(); } catch (e) {}
+}
+
+async function qxRunFigureGen() {
+    if (!qxState.lastCropB64) return;
+    qxState.figure = { status: 'generating' };
+    qxFigureUpdateBox();
+    try {
+        const im = await qxGenerateFigureImage(qxState.lastCropB64);
+        qxState.figure = { status: 'ready', mime: im.mime, data: im.data, dataUrl: 'data:' + im.mime + ';base64,' + im.data };
+    } catch (err) {
+        qxState.figure = { status: 'error', error: err.message || String(err) };
+    }
+    qxFigureUpdateBox();
+}
+
+// ---------- save-time upload & placeholder replacement ----------
+function qxB64ToBlob(b64, mime) {
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime || 'image/png' });
+}
+
+function qxImgDims(dataUrl) {
+    return new Promise(resolve => {
+        const fallback = { w: FIG_IMG_DEFAULT_W, h: FIG_IMG_DEFAULT_H };
+        try {
+            const im = new Image();
+            const t = setTimeout(() => resolve(fallback), 1500);
+            im.onload = () => { clearTimeout(t); resolve({ w: im.naturalWidth || fallback.w, h: im.naturalHeight || fallback.h }); };
+            im.onerror = () => { clearTimeout(t); resolve(fallback); };
+            im.src = dataUrl;
+        } catch (e) { resolve(fallback); }
+    });
+}
+
+// Uploads the generated figure and returns the <img> tag (jsDelivr URL),
+// or null when hosting is unconfigured / upload fails (caller keeps the
+// placeholder so the Figure Updater tab can attach an image later).
+async function qxUploadFigureGetTag() {
+    const f = qxState.figure;
+    if (!f || f.status !== 'ready' || !f.data) return null;
+    const hosted = typeof figState !== 'undefined' && figState.github && figState.github.repo && figState.github.token;
+    if (!hosted) {
+        showToast('Figure not uploaded', 'Image Hosting is not configured — open the Figure Updater tab → Image Hosting (GitHub) and set repo + token. The question was saved with its [image here] placeholder.', 'info');
+        return null;
+    }
+    f.status = 'uploading';
+    qxFigureUpdateBox();
+    try {
+        const ext = /png/.test(f.mime) ? 'png' : /jpe?g/.test(f.mime) ? 'jpg' : /webp/.test(f.mime) ? 'webp' : 'png';
+        const fileName = 'qx-fig-' + Date.now() + '.' + ext;
+        const url = await figUploadImageToGitHub(qxB64ToBlob(f.data, f.mime), fileName);
+        const dims = await qxImgDims(f.dataUrl);
+        const w = FIG_IMG_DEFAULT_W;
+        const h = Math.max(20, Math.round(w * (dims.h / Math.max(1, dims.w))));
+        f.status = 'ready';
+        return figBuildImgTag(url, w, h);
+    } catch (err) {
+        f.status = 'error';
+        f.error = err.message || String(err);
+        qxFigureUpdateBox();
+        showToast('Figure upload failed', (err.message || err) + ' — the question was saved with its [image here] placeholder instead.', 'error');
+        return null;
+    }
+}
+
+function qxInsertFigureTag(html, tag) {
+    if (!html) return html;
+    if (FIG_PLACEHOLDER_RE.test(html)) return html.replace(FIG_PLACEHOLDER_RE, tag);
+    return html + '<br>' + tag;   // no placeholder — append after the question text
 }
