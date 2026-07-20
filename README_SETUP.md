@@ -177,6 +177,21 @@ longer generates figures itself.
 
 ---
 
+## Span-pages (crop across a page break)
+
+Both PDF viewers — the **Question Extractor** and the **Figure Updater** —
+have a **Span pages** toggle in the page-navigation bar. When a question
+(or figure) starts near the bottom of one page and continues onto the next,
+turn it on: the current page and the following page are rendered stacked on
+one tall, scrollable canvas with a dashed line marking the page boundary, so
+you can drag a single crop selection straight across the break and capture
+the whole question in one go. The page label shows the range (e.g. "1–2"),
+and Next/Prev step by the span. Turn it off to return to the normal
+one-page-at-a-time view. (Images loaded directly are single-canvas already
+and ignore the toggle.)
+
+---
+
 ## Match-the-list & table questions
 
 The Question Extractor now handles **match-the-list / match-the-columns**
