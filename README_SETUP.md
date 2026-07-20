@@ -209,9 +209,19 @@ exam papers. Workflow:
    it in the quiz frontend: formatted question text with KaTeX math,
    lettered option cards with the correct one highlighted (✓), and the
    explanation panel; bilingual questions show both language sections. A
-   **Preview | Editor** toggle at the top switches to **Editor mode** with
-   the editable fields — question, options (add/remove, pick the correct
-   one), explanation, Hindi side for bilingual. Edits are never lost when
+   **Preview | Editor** toggle at the top switches to **Editor mode**,
+   where the **question and explanation fields use the same full rich
+   editor as the Question Editor tab** — a **Blogger-style toolbar**
+   (undo/redo, font family & size, Normal/Heading/Subheading/Minor
+   heading/Paragraph/Quote dropdown, bold/italic/underline/strikethrough,
+   text-colour & highlight palette pickers with custom colour, sub/
+   superscript, link/image/table, left/centre/right/justify alignment,
+   numbered & bulleted lists, remove formatting), plus Compose /
+   HTML-source / live-preview tabs and the ∑ LaTeX helper for inserting
+   math enclosers. The toolbar is one shared component, so the interface
+   is exactly identical in the Question Editor modal and the Extractor — while options stay as
+   quick inline inputs (add/remove, radio for the correct one), with a
+   full Hindi editor set for bilingual questions. Edits are never lost when
    switching: Preview re-reads the current field values every time it
    opens, so you can flip back and forth to check how changes render, then
    **Save to Question Bank** from either mode.
