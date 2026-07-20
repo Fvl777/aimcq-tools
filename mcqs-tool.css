@@ -1389,3 +1389,21 @@
     max-width: 280px; max-height: 220px; display: block;
     background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 4px;
 }
+
+/* ===== AI-generated figure slot badge ===== */
+.fig-slot-ai {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 9.5px; font-weight: 800; letter-spacing: .03em;
+    color: #0369a1; background: #e0f2fe; border: 1px solid #bae6fd;
+    border-radius: 999px; padding: 1px 6px; margin-top: 2px;
+}
+
+/* ===== Tables inside extractor review preview & rich editors ===== */
+.qx-prev-q table, .qx-prev-katex table {
+    border-collapse: collapse; width: auto; margin: 8px 0; font-size: 13.5px;
+}
+.qx-prev-q table td, .qx-prev-q table th,
+.qx-prev-katex table td, .qx-prev-katex table th {
+    border: 1px solid #d1d5db; padding: 5px 10px; text-align: left; vertical-align: top;
+}
+.qx-prev-q table th, .qx-prev-katex table th { background: #f3f4f6; font-weight: 700; }
