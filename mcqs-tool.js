@@ -903,16 +903,21 @@
 
             <!-- Step 3: Review -->
             <div id="qx-review" class="hidden space-y-3">
-                <div class="flex items-center gap-3">
+                <div class="flex items-center gap-3 flex-wrap">
                     <span class="w-7 h-7 rounded-full bg-rose-600 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">3</span>
                     <h3 class="font-semibold text-gray-800">Review &amp; save</h3>
                     <span id="qx-confidence" class="ai-status-chip off"></span>
+                    <div class="qx-provider-switch ml-auto" id="qx-review-mode" title="Preview shows the question exactly as students will see it">
+                        <button type="button" data-mode="preview" onclick="qxSetReviewMode('preview')"><i data-lucide="eye" class="w-3.5 h-3.5 inline-block mr-1 -mt-0.5"></i>Preview</button>
+                        <button type="button" data-mode="editor" onclick="qxSetReviewMode('editor')"><i data-lucide="pencil" class="w-3.5 h-3.5 inline-block mr-1 -mt-0.5"></i>Editor</button>
+                    </div>
                 </div>
                 <div class="bg-white border border-gray-200 rounded-2xl p-4 space-y-4 shadow-sm">
                     <div class="flex items-start gap-3 flex-wrap">
                         <img id="qx-crop-thumb" class="qx-crop-thumb" alt="cropped question">
                         <p id="qx-ai-note" class="text-xs text-gray-500 flex-1 min-w-[200px]"></p>
                     </div>
+                    <div id="qx-preview-panel" class="hidden"><!-- student-facing preview (rendered by JS) --></div>
                     <div id="qx-fields"><!-- primary language fields (rendered by JS) --></div>
                     <div id="qx-fields-hi" class="hidden border-t border-gray-100 pt-4"><!-- hindi fields --></div>
                     <div class="flex items-center gap-2 flex-wrap pt-1">
