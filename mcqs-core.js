@@ -6937,9 +6937,17 @@ async function aiGeminiRequest(prompt, opts) {
 
     // Multimodal support: opts.imageB64 (+ opts.imageMime) attaches an image
     // part before the text prompt — used by the Question Extractor.
+    // opts.imagesB64 (array) attaches MULTIPLE image parts in order — used
+    // when a single question spans several crops (e.g. continues on the next
+    // page, or the same question in another language on the next page).
     const userParts = [];
-    if (opts.imageB64) {
-        userParts.push({ inline_data: { mime_type: opts.imageMime || 'image/webp', data: opts.imageB64 } });
+    const mime = opts.imageMime || 'image/webp';
+    if (Array.isArray(opts.imagesB64) && opts.imagesB64.length) {
+        opts.imagesB64.forEach(b64 => {
+            if (b64) userParts.push({ inline_data: { mime_type: mime, data: b64 } });
+        });
+    } else if (opts.imageB64) {
+        userParts.push({ inline_data: { mime_type: mime, data: opts.imageB64 } });
     }
     userParts.push({ text: prompt });
 
@@ -7631,6 +7639,7 @@ const qxState = {
     cropper: null,
     result: null,          // current AI extraction under review
     cropThumb: '',         // small dataURL of the crop (stored with record)
+    crops: [],             // queued crops for a multi-part question: [{b64, thumb}]
     busy: false,
 };
 
@@ -7967,14 +7976,15 @@ function qxLoadPdfFile(file) {
     reader.readAsArrayBuffer(file);
 }
 
-function qxGetCropCanvas() {
+function qxGetCropCanvas(opts) {
+    opts = opts || {};
     if (!qxState.cropper) {
-        showToast('No cropper', 'Load a PDF or image first.', 'error');
+        if (!opts.silent) showToast('No cropper', 'Load a PDF or image first.', 'error');
         return null;
     }
     const data = qxState.cropper.getData(true);
     if (!data || data.width < 2 || data.height < 2) {
-        showToast('No selection', 'Drag a box around one complete question first.', 'error');
+        if (!opts.silent) showToast('No selection', 'Drag a box around one complete question first.', 'error');
         return null;
     }
     const out = qxState.cropper.getCroppedCanvas({
@@ -7986,6 +7996,63 @@ function qxGetCropCanvas() {
         return null;
     }
     return out;
+}
+
+// ---------- multi-crop queue ----------
+// A single question sometimes spans more than one crop: it continues on the
+// next page, or the same question is printed again in another language further
+// down. "Add crop" banks the current selection (letting the user turn the page
+// and select more) and "Extract" then sends every banked crop plus the current
+// selection to the AI as ONE question.
+function qxAddCrop() {
+    const crop = qxGetCropCanvas();
+    if (!crop) return;
+    const b64 = qxScaleCanvas(crop, 1600).toDataURL('image/webp', 0.92).split(',')[1];
+    const thumb = qxScaleCanvas(crop, 300).toDataURL('image/jpeg', 0.7);
+    qxState.crops.push({ b64, thumb });
+    qxRenderCropQueue();
+    showToast('Crop added', `${qxState.crops.length} crop${qxState.crops.length > 1 ? 's' : ''} queued. Turn the page / select more, then Extract to combine them into one question.`, 'success');
+}
+
+function qxRemoveCrop(idx) {
+    if (idx < 0 || idx >= qxState.crops.length) return;
+    qxState.crops.splice(idx, 1);
+    qxRenderCropQueue();
+}
+
+function qxClearCrops() {
+    if (!qxState.crops.length) return;
+    qxState.crops = [];
+    qxRenderCropQueue();
+}
+
+function qxRenderCropQueue() {
+    const wrap = document.getElementById('qx-crop-queue');
+    if (!wrap) return;
+    const n = qxState.crops.length;
+    if (!n) { wrap.classList.add('hidden'); wrap.innerHTML = ''; return; }
+    wrap.classList.remove('hidden');
+    let items = '';
+    qxState.crops.forEach((c, i) => {
+        items += `
+        <div class="qx-crop-queue-item" title="Crop ${i + 1}">
+            <span class="qx-crop-queue-num">${i + 1}</span>
+            <img src="${c.thumb || ''}" alt="crop ${i + 1}">
+            <button type="button" class="qx-crop-queue-del" data-idx="${i}" title="Remove this crop"><i data-lucide="x" class="w-3 h-3"></i></button>
+        </div>`;
+    });
+    wrap.innerHTML = `
+        <div class="qx-crop-queue-head">
+            <span><i data-lucide="layers" class="w-3.5 h-3.5 inline-block -mt-0.5 mr-1"></i>${n} crop${n > 1 ? 's' : ''} queued for one question</span>
+            <button type="button" id="qx-crop-clear" class="qx-crop-queue-clear">Clear all</button>
+        </div>
+        <div class="qx-crop-queue-strip">${items}</div>
+        <p class="qx-crop-queue-hint">These will be combined into a single question when you click Extract (the current on-screen selection, if any, is added last).</p>`;
+    wrap.querySelectorAll('.qx-crop-queue-del').forEach(b =>
+        b.addEventListener('click', () => qxRemoveCrop(parseInt(b.getAttribute('data-idx'), 10))));
+    const clr = document.getElementById('qx-crop-clear');
+    if (clr) clr.addEventListener('click', qxClearCrops);
+    if (window.lucide && lucide.createIcons) { try { lucide.createIcons(); } catch (e) {} }
 }
 
 // Downscale a canvas so its longest side <= max (API payload size control).
@@ -8106,13 +8173,27 @@ async function qxExtract() {
             `No ${QX_PROVIDERS[qxPools.provider].label} keys configured — open "Extractor API Settings" at the top of this tab and add at least one key (or switch provider).`, 'error');
         return;
     }
-    const crop = qxGetCropCanvas();
-    if (!crop) return;
+    // Gather all crops for this question: any queued (from other pages) plus
+    // the current on-screen selection, if one is drawn. The queued crops come
+    // first so page order is preserved.
+    const images = [];
+    const thumbs = [];
+    qxState.crops.forEach(c => { if (c && c.b64) { images.push(c.b64); thumbs.push(c.thumb || ''); } });
 
-    // API image (bounded size) + small thumbnail for the bank record.
-    const apiCanvas = qxScaleCanvas(crop, 1600);
-    const b64 = apiCanvas.toDataURL('image/webp', 0.92).split(',')[1];
-    qxState.cropThumb = qxScaleCanvas(crop, 300).toDataURL('image/jpeg', 0.7);
+    const crop = qxGetCropCanvas({ silent: qxState.crops.length > 0 });
+    if (crop) {
+        const apiCanvas = qxScaleCanvas(crop, 1600);
+        images.push(apiCanvas.toDataURL('image/webp', 0.92).split(',')[1]);
+        thumbs.push(qxScaleCanvas(crop, 300).toDataURL('image/jpeg', 0.7));
+    }
+
+    if (!images.length) {
+        showToast('No selection', 'Drag a box around the question (or add crops) first.', 'error');
+        return;
+    }
+
+    // Thumbnail stored with the record — first crop is representative.
+    qxState.cropThumb = thumbs[0] || '';
 
     const langMode = (document.getElementById('qx-lang') || {}).value || 'auto';
     const wantSteps = !!(document.getElementById('qx-steps') || {}).checked;
@@ -8125,7 +8206,7 @@ async function qxExtract() {
     if (label) label.textContent = 'Extracting with AI…';
 
     try {
-        const call = await qxRunExtraction(qxBuildPrompt, langMode, b64, wantSteps, detailLevel);
+        const call = await qxRunExtraction(qxBuildPrompt, langMode, images, wantSteps, detailLevel);
         const raw = call.text;
         const p = aiParseJson(raw);
 
@@ -8152,6 +8233,8 @@ async function qxExtract() {
             } : null,
         };
         qxRenderReview();
+        // Consumed the queued crops — reset for the next question.
+        if (qxState.crops.length) { qxState.crops = []; qxRenderCropQueue(); }
         showToast('Question extracted', 'Review the fields below, edit if needed, then Save to Question Bank.', 'success');
     } catch (err) {
         showToast('Extraction failed', aiFriendlyError(err), 'error');
@@ -8595,11 +8678,14 @@ async function qxExportBank() {
         document.getElementById('qx-change-file').addEventListener('click', () => {
             if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
             qxState.pdfDoc = null; qxState.srcType = '';
+            if (qxState.crops.length) { qxState.crops = []; qxRenderCropQueue(); }
             document.getElementById('qx-workspace').classList.add('hidden');
             document.getElementById('qx-source-pick').classList.remove('hidden');
         });
 
         document.getElementById('qx-extract-btn').addEventListener('click', qxExtract);
+        const addCropBtn = document.getElementById('qx-add-crop-btn');
+        if (addCropBtn) addCropBtn.addEventListener('click', qxAddCrop);
         document.getElementById('qx-save-btn').addEventListener('click', qxSaveToBank);
         document.getElementById('qx-discard-btn').addEventListener('click', () => {
             qxState.result = null;
@@ -9050,31 +9136,59 @@ const QX_TRANSCRIBE_PROMPT =
     'Keep the question stem and the answer options clearly separated (transcribe the stem, then the options in order); do not merge option text into the stem. ' +
     'Include a printed/typeset answer key if present (e.g. a typeset "Answer (1)" line), but NOT hand-drawn ticks/crosses/circles/scribbles. Output ONLY the raw transcription — no commentary.';
 
-async function qxGeminiTranscribe(imageB64) {
+async function qxGeminiTranscribe(images) {
     const visionModel = qxPools.visionModel || QX_VISION_MODEL_DEFAULT;
-    // Prefer the extractor's Gemini pool (with failover); fall back to the
-    // Question Editor's Gemini key if the pool is empty. Always uses the
-    // dedicated vision model (default: gemma-4-31b-it) — independent of
-    // whichever Gemini model is selected for direct Gemini-mode extraction,
-    // so it draws on its own free-tier quota.
-    if (qxPoolConfiguredKeys('gemini').length) {
-        const call = await qxAiCall(QX_TRANSCRIBE_PROMPT,
-            { imageB64, imageMime: 'image/webp', plainText: true, modelOverride: visionModel }, 'gemini');
-        return call.text;
+    // `images` may be a single base64 string or an array of them. When more
+    // than one crop is supplied (a question that continues onto another page,
+    // or the same question in a second language), each crop is transcribed on
+    // its own and the pieces are joined so the structuring step sees the whole
+    // question as one continuous input.
+    const list = Array.isArray(images) ? images.filter(Boolean) : [images].filter(Boolean);
+    if (!list.length) throw new Error('No crop to transcribe.');
+
+    const transcribeOne = async (b64) => {
+        // Prefer the extractor's Gemini pool (with failover); fall back to the
+        // Question Editor's Gemini key if the pool is empty. Always uses the
+        // dedicated vision model (default: gemma-4-31b-it) — independent of
+        // whichever Gemini model is selected for direct Gemini-mode extraction,
+        // so it draws on its own free-tier quota.
+        if (qxPoolConfiguredKeys('gemini').length) {
+            const call = await qxAiCall(QX_TRANSCRIBE_PROMPT,
+                { imageB64: b64, imageMime: 'image/webp', plainText: true, modelOverride: visionModel }, 'gemini');
+            return call.text;
+        }
+        if (typeof aiConfigured === 'function' && aiConfigured()) {
+            return aiGeminiRequest(QX_TRANSCRIBE_PROMPT,
+                { imageB64: b64, imageMime: 'image/webp', plainText: true, model: visionModel });
+        }
+        throw new Error('DeepSeek mode needs a Gemini-API key for reading the image (DeepSeek has no image input). Add a Gemini key to the extractor pool, or configure the Question Editor\'s AI settings.');
+    };
+
+    if (list.length === 1) return transcribeOne(list[0]);
+
+    const parts = [];
+    for (let i = 0; i < list.length; i++) {
+        const t = await transcribeOne(list[i]);
+        parts.push(`--- Crop ${i + 1} of ${list.length} ---\n${(t || '').trim()}`);
     }
-    if (typeof aiConfigured === 'function' && aiConfigured()) {
-        return aiGeminiRequest(QX_TRANSCRIBE_PROMPT,
-            { imageB64, imageMime: 'image/webp', plainText: true, model: visionModel });
-    }
-    throw new Error('DeepSeek mode needs a Gemini-API key for reading the image (DeepSeek has no image input). Add a Gemini key to the extractor pool, or configure the Question Editor\'s AI settings.');
+    // The pieces belong to ONE question — flag that for the structuring step.
+    return 'The following transcription comes from MULTIPLE crops of the SAME question (it continues across crops, e.g. onto the next page, or repeats in another language). Treat all crops together as one single question.\n\n' + parts.join('\n\n');
 }
 
-async function qxRunExtraction(buildPrompt, langMode, imageB64, wantSteps, detailLevel) {
+async function qxRunExtraction(buildPrompt, langMode, images, wantSteps, detailLevel) {
     const label = document.getElementById('qx-extract-label');
+    // `images` may be a single base64 string or an array (multi-crop question).
+    const imgList = Array.isArray(images) ? images.filter(Boolean) : [images].filter(Boolean);
+    const multi = imgList.length > 1;
+    const emptyMsg = multi
+        ? 'Image transcription came back empty — try tighter, clearer crops.'
+        : 'Image transcription came back empty — try a tighter, clearer crop.';
+    const readLabel = (m) => multi ? `Reading ${imgList.length} crops (${m})…` : `Reading image (${m})…`;
+
     if (qxPools.provider === 'deepseek') {
-        if (label) label.textContent = 'Reading image (vision model)…';
-        const transcript = await qxGeminiTranscribe(imageB64);
-        if (!transcript || !transcript.trim()) throw new Error('Image transcription came back empty — try a tighter, clearer crop.');
+        if (label) label.textContent = readLabel(qxPools.visionModel || 'vision model');
+        const transcript = await qxGeminiTranscribe(imgList);
+        if (!transcript || !transcript.trim()) throw new Error(emptyMsg);
         if (label) label.textContent = 'Structuring with DeepSeek…';
         return qxAiCall(buildPrompt(langMode, transcript.trim(), wantSteps, detailLevel), {}, 'deepseek');
     }
@@ -9083,9 +9197,9 @@ async function qxRunExtraction(buildPrompt, langMode, imageB64, wantSteps, detai
     // Gemini model runs TEXT-ONLY for the actual question generation.
     if (qxPools.gemini.split) {
         try {
-            if (label) label.textContent = `Reading image (${qxPools.visionModel})…`;
-            const transcript = await qxGeminiTranscribe(imageB64);
-            if (!transcript || !transcript.trim()) throw new Error('Image transcription came back empty — try a tighter, clearer crop.');
+            if (label) label.textContent = readLabel(qxPools.visionModel);
+            const transcript = await qxGeminiTranscribe(imgList);
+            if (!transcript || !transcript.trim()) throw new Error(emptyMsg);
             if (label) label.textContent = `Generating (${qxPools.gemini.model})…`;
             return await qxAiCall(buildPrompt(langMode, transcript.trim(), wantSteps, detailLevel), {}, 'gemini');
         } catch (err) {
@@ -9096,12 +9210,27 @@ async function qxRunExtraction(buildPrompt, langMode, imageB64, wantSteps, detai
                     `"${qxPools.visionModel}" was rejected by the API (${err.message || 'not found'}). Falling back to a single multimodal ${qxPools.gemini.model} call. Fix the vision model id in the Extractor API Settings.`,
                     'info');
                 if (label) label.textContent = 'Extracting with AI…';
-                return qxAiCall(buildPrompt(langMode, undefined, wantSteps, detailLevel), { imageB64, imageMime: 'image/webp' }, 'gemini');
+                return qxAiCall(qxWithMultiHint(buildPrompt, langMode, wantSteps, detailLevel, multi), qxImgOpts(imgList), 'gemini');
             }
             throw err;
         }
     }
-    return qxAiCall(buildPrompt(langMode, undefined, wantSteps, detailLevel), { imageB64, imageMime: 'image/webp' }, 'gemini');
+    return qxAiCall(qxWithMultiHint(buildPrompt, langMode, wantSteps, detailLevel, multi), qxImgOpts(imgList), 'gemini');
+}
+
+// Build the image opts for a direct multimodal Gemini call from 1..N crops.
+function qxImgOpts(imgList) {
+    return imgList.length > 1
+        ? { imagesB64: imgList, imageMime: 'image/webp' }
+        : { imageB64: imgList[0], imageMime: 'image/webp' };
+}
+
+// For direct (non-split) multimodal calls there is no transcript to carry the
+// "these crops are one question" hint, so prepend it to the prompt instead.
+function qxWithMultiHint(buildPrompt, langMode, wantSteps, detailLevel, multi) {
+    const base = buildPrompt(langMode, undefined, wantSteps, detailLevel);
+    if (!multi) return base;
+    return 'NOTE: You are given MULTIPLE images that are all crops of the SAME single question — it continues across the images (e.g. the question or its options continue on the next page, or the same question appears in another language). Combine ALL images into ONE question.\n\n' + base;
 }
 
 (function qxPoolBoot() {
