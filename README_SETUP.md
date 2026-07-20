@@ -138,37 +138,31 @@ the substance to the required depth.
 
 ---
 
-## AI figure extraction (graphs, circuits, tables → GitHub + jsDelivr)
+## AI figure generator (Figure Updater tab — optional)
 
-For questions whose crop contains a **figure** — a graph, circuit diagram,
-truth table, labelled illustration (common in NEET/JEE physics) — the
-extractor can now reproduce the figure as its own image and attach it to
-the question:
+Figure reproduction lives in the **Figure Updater** tab, as an optional
+manual step inside **Quick Crop & Upload**:
 
-1. Keep the **AI figures** toggle (next to Step-by-step math) checked.
-   When the extracted question contains an `[image here: …]` placeholder,
-   the crop is automatically sent to the **figure image model** (default
-   `gemini-3.1-flash-lite-image`, changeable in Extractor API Settings
-   incl. a custom id) which generates ONLY the figure as a clean
-   standalone image — question text, options and answer markings excluded.
-   The call runs through the same Gemini key pool with limit rotation.
-2. The generated figure previews in the review panel with **Regenerate**
-   and **Remove** buttons and a status chip; the review stays fully usable
-   while it generates.
-3. On **Save to Question Bank**, the figure is uploaded to GitHub using
-   the **Figure Updater tab → Image Hosting** settings (repo / branch /
-   folder / token) and the `[image here]` placeholder in the question
-   (both languages) is replaced by the standard
-   `<img class="aimcq-question-image">` tag pointing at the **jsDelivr
-   CDN** URL — identical markup to what the Figure Updater produces.
-4. If Image Hosting is not configured (or the upload fails), the question
-   is saved with its placeholder intact so you can attach an image later
-   via the Figure Updater tab; the panel tells you which case you're in.
+1. Load the PDF/image, crop the figure region (graph, circuit, truth
+   table, labelled diagram — common in NEET/JEE physics) as usual.
+2. Tick **AI figure generator** (off by default). A model selector appears
+   (default `gemini-3.1-flash-lite-image`, with a custom-id field), and the
+   button relabels to **Generate Figure & Upload**.
+3. Click it: the crop is sent to the image-output model, which reproduces
+   ONLY the figure as a clean standalone image on white — question text,
+   options, answer markings and watermarks removed — and that generated
+   image is then uploaded to GitHub and served via **jsDelivr**, giving you
+   a reusable CDN URL exactly like a normal crop upload. Leave the toggle
+   off to upload the raw crop unchanged.
+4. Use the resulting URL through the tab's normal figure-slot workflow to
+   write it into the target question(s).
 
-Current scope: one figure per question (the main figure the question body
-refers to). Questions whose *options* are figures (e.g. four graph
-options) still extract their text/placeholders normally — attach those
-per-option images via the Figure Updater tab.
+The AI call uses a Gemini API key from the **Question Extractor key pool**
+(with the same 24 h limit rotation), falling back to the **Question
+Editor** AI key; if neither is set it tells you. Uploading uses this tab's
+**Image Hosting (GitHub)** settings. This keeps figure generation fully
+manual and separate from question extraction — the Question Extractor no
+longer generates figures itself.
 
 ---
 
