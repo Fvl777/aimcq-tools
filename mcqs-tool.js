@@ -641,7 +641,7 @@
                             <p class="text-xs text-sky-700">Crop any region and upload it to your chosen image host — get a reusable image URL.</p>
                         </div>
                         <div class="flex items-center gap-2 flex-wrap">
-                            <label class="flex items-center gap-1.5 text-xs font-semibold text-sky-800 bg-white border border-sky-200 rounded-lg px-3 py-2 cursor-pointer" title="When on, Crop & Upload first sends the crop to the AI image model to reproduce ONLY the figure (removing question text, options, watermarks) before uploading">
+                            <label class="flex items-center gap-1.5 text-xs font-semibold text-sky-800 bg-white border border-sky-200 rounded-lg px-3 py-2 cursor-pointer" title="When on, every crop — Quick Crop & Upload AND each question/option figure slot's Crop & Set — first sends the crop to the AI image model to reproduce ONLY the figure (removing question text, options, watermarks) before setting/uploading it">
                                 <input type="checkbox" id="fig-ai-gen" class="accent-sky-600">
                                 <i data-lucide="sparkles" class="w-3.5 h-3.5 text-sky-500"></i> AI figure generator
                             </label>
@@ -654,7 +654,7 @@
                         <label class="text-[11px] font-bold text-sky-700 uppercase tracking-wider whitespace-nowrap">AI figure model</label>
                         <select id="fig-ai-model" class="text-xs border border-sky-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-sky-400"></select>
                         <input type="text" id="fig-ai-model-custom" placeholder="custom image model id" class="hidden text-xs border border-sky-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-sky-400">
-                        <span class="text-[11px] text-sky-500">Reproduces only the figure from the crop, then uploads it. Uses a Gemini API key from the Question Extractor pool, or the Question Editor's key.</span>
+                        <span class="text-[11px] text-sky-500">Reproduces only the figure from each crop (Quick Crop &amp; Upload and every figure slot's Crop &amp; Set), then uploads it. Uses a Gemini API key from the Question Extractor pool, or the Question Editor's key.</span>
                     </div>
                     <div id="fig-quick-result" class="hidden mt-3 text-xs"></div>
                 </div>
