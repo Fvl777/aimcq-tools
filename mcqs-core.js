@@ -2507,15 +2507,89 @@ function switchReMode(field, mode, wrap) {
 }
 
 // Pretty-print HTML: every tag on its own line with indent tracking
+// Blogger-style structured HTML source: block tags on their own lines with
+// 2-space indentation, one line per <br>, short leaf blocks kept compact.
+// Attribute-carrying <span>s (colours/fonts from the toolbar) and <br> line
+// structure are PRESERVED — only editing junk (bare wrappers, &nbsp;) is
+// normalised away.
+const RE_BLOCK_TAGS = 'p|div|h[1-6]|ul|ol|li|table|thead|tbody|tfoot|tr|td|th|blockquote|figure|figcaption|pre|section|article';
+
 function formatHtmlSource(html) {
     if (!html) return '';
-    return html
-        .replace(/<div><br\s*\/?><\/div>/gi, '')
-        .replace(/<div>([\s\S]*?)<\/div>/gi, '$1')
-        .replace(/<br\s*\/?>/gi, '')
-        .replace(/<span[^>]*>([\s\S]*?)<\/span>/gi, '$1')
-        .replace(/&nbsp;/gi, ' ')
-        .trim();
+    let src = String(html)
+        .replace(/<div><br\s*\/?><\/div>/gi, '<br>')
+        .replace(/<span>([\s\S]*?)<\/span>/gi, '$1')            // only attribute-less spans
+        .replace(/&nbsp;/gi, ' ');
+    // Unwrap contenteditable's bare <div> line wrappers into <br> lines
+    // (attribute-carrying divs are left untouched). Loop for nesting.
+    for (let i = 0; i < 6; i++) {
+        const next = src.replace(/<div>([\s\S]*?)<\/div>/gi, '$1<br>');
+        if (next === src) break;
+        src = next;
+    }
+    src = src.replace(/(?:\s*<br\s*\/?>\s*)+$/i, '').trim();    // no trailing blank lines
+    return prettyHtmlSource(src);
+}
+
+function prettyHtmlSource(src) {
+    if (!src) return '';
+    const B = '(?:' + RE_BLOCK_TAGS + ')';
+    let t = src
+        .replace(new RegExp('\\s*(<' + B + '(?=[\\s>])[^>]*>)', 'gi'), '\n$1')
+        .replace(new RegExp('(<' + B + '(?=[\\s>])[^>]*>)\\s*(?=<)', 'gi'), '$1\n')
+        .replace(new RegExp('\\s*(</' + B + '>)', 'gi'), '\n$1')
+        .replace(new RegExp('(</' + B + '>)\\s*', 'gi'), '$1\n')
+        .replace(/(<br\s*\/?>)\s*/gi, '$1\n');
+
+    const lines = t.split('\n').map(l => l.trim()).filter(l => l !== '');
+    const openRe = new RegExp('^<' + B + '(?=[\\s>])', 'i');
+    const closeRe = new RegExp('^</' + B + '>', 'i');
+    const selfContained = new RegExp('^<(' + B + ')(?=[\\s>])[^>]*>[\\s\\S]*</\\1>$', 'i');
+
+    let depth = 0;
+    const indented = [];
+    for (const line of lines) {
+        if (closeRe.test(line)) depth = Math.max(0, depth - 1);
+        indented.push('  '.repeat(depth) + line);
+        if (openRe.test(line) && !selfContained.test(line)) depth++;
+    }
+
+    // Compact short leaf blocks (content may contain inline tags like <b>):
+    //   <li> / <b>x</b> y / </li>  →  <li><b>x</b> y</li>
+    //   <td>text / </td>           →  <td>text</td>
+    const blockish = new RegExp('</?' + B + '(?=[\\s>/])', 'i');
+    const out = [];
+    for (let i = 0; i < indented.length; i++) {
+        const a = indented[i], b = indented[i + 1], c = indented[i + 2];
+        const at = a.trim();
+        if (b !== undefined && c !== undefined) {
+            const bt = b.trim(), ct = c.trim();
+            const m = at.match(new RegExp('^<(' + B + ')(?=[\\s>])[^>]*>$', 'i'));
+            if (m && ct.toLowerCase() === '</' + m[1].toLowerCase() + '>' &&
+                !blockish.test(bt) && !/^<br/i.test(bt) &&
+                (at.length + bt.length + ct.length) <= 90) {
+                out.push(a + bt + ct);
+                i += 2;
+                continue;
+            }
+        }
+        if (b !== undefined) {
+            const bt = b.trim();
+            const m2 = at.match(new RegExp('^<(' + B + ')(?=[\\s>])[^>]*>', 'i'));
+            if (m2) {
+                const rest = at.slice(at.indexOf('>') + 1);
+                if (rest && !blockish.test(rest) &&
+                    bt.toLowerCase() === '</' + m2[1].toLowerCase() + '>' &&
+                    (at.length + bt.length) <= 90) {
+                    out.push(a + bt);
+                    i += 1;
+                    continue;
+                }
+            }
+        }
+        out.push(a);
+    }
+    return out.join('\n');
 }
 
 function updateToolbarState(toolbar, compose) {
@@ -2527,11 +2601,15 @@ function updateToolbarState(toolbar, compose) {
         try { on = document.queryCommandState && document.queryCommandState(cmd); } catch (e) {}
         btn.classList.toggle('active', !!on);
     });
-    // Sync heading select
+    // Sync heading select (Blogger option set)
     const sel = toolbar.querySelector('.re-heading-select');
     if (sel) {
-        const block = document.queryCommandValue('formatBlock').toLowerCase().replace(/^<|>$/g, '') || 'div';
-        sel.value = ['h1','h2','h3','h4','h5'].includes(block) ? block : 'div';
+        let block = 'div';
+        try {
+            block = ((document.queryCommandValue && document.queryCommandValue('formatBlock')) || 'div')
+                .toLowerCase().replace(/^<|>$/g, '') || 'div';
+        } catch (e) {}
+        sel.value = ['h2','h3','h4','p','blockquote'].includes(block) ? block : 'div';
     }
 }
 
@@ -6544,7 +6622,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v2.3.0 (Blogger-style rich editor toolbar — identical in Question Editor & Extractor) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v2.3.1 (Blogger-style HTML view — structured indented source, light theme) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
