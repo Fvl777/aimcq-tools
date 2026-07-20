@@ -6768,7 +6768,7 @@ function qbBuildJson() {
             }
         }
         if (window.console && console.info) {
-            console.info('[mcqs-tool] core v2.9.0 (Span-pages continuous PDF view — crop questions across a page break, both tabs) loaded OK — GitHub picker ready.');
+            console.info('[mcqs-tool] core v2.9.1 (extractor: keep options out of question field; ignore tick/cross/handwriting artifacts) loaded OK — GitHub picker ready.');
         }
     } catch (e) {
         if (window.console && console.error) {
@@ -8003,6 +8003,34 @@ function qxScaleCanvas(src, max) {
 }
 
 // ---------- extraction ----------
+// Safety net: strip answer-marking artifacts (stray tick/cross/marks) and
+// any leaked answer-option text from a question field. The prompt already
+// instructs the model to omit these; this cleans up the occasional leak
+// without touching legitimate content (tables, figures, statements).
+function qxStripArtifacts(html, options) {
+    if (!html) return html;
+    let out = html;
+    // 1) Remove stray standalone tick/cross/checkbox artifact glyphs that are
+    //    not part of normal prose. Only remove when isolated (surrounded by
+    //    whitespace/tags/limits), so we never touch a legit × in "2 × 10^3".
+    out = out.replace(/(^|[\s>(\[])[\u2713\u2714\u2717\u2718\u2611\u2612\u274c\u2716](?=$|[\s<)\].,])/g, '$1');
+    // 2) If the model appended the full option list to the end of the stem as
+    //    loose lines, drop a trailing run that exactly matches the options.
+    if (Array.isArray(options) && options.length >= 2) {
+        const norm = t => String(t).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+        const optSet = options.map(norm).filter(Boolean);
+        // split trailing <br>/<p> segments and remove ones equal to an option
+        const parts = out.split(/(?:<br\s*\/?>|<\/p>\s*<p>)/i);
+        while (parts.length > 1) {
+            const tail = norm(parts[parts.length - 1]);
+            if (tail && optSet.includes(tail)) { parts.pop(); }
+            else break;
+        }
+        out = parts.join('<br>');
+    }
+    return out.replace(/(?:\s*<br\s*\/?>\s*)+$/i, '').trim();
+}
+
 function qxBuildPrompt(langMode, transcript, wantSteps, detailLevel) {
     const L = [];
     L.push('You are an expert exam-question transcriber and subject-matter solver.');
@@ -8021,7 +8049,9 @@ function qxBuildPrompt(langMode, transcript, wantSteps, detailLevel) {
     L.push('- LINE BREAKS (critical — do NOT copy the image\'s visual word-wrap): only insert a <br> where there is a genuine logical break — a new labeled statement/point (A./B./I./II./1./2. etc.), a distinct sentence that is clearly a separate line/point by the author\'s intent, or a real paragraph break. If a sentence merely wraps to the next visual line in the source because of column/page width, that is NOT a break — join the wrapped words back into ONE continuous line with a single space (do not insert <br>, and do not preserve a line break just because the source image had one there). When in doubt whether a break is logical or just word-wrap, prefer joining the text into one continuous line/sentence over inserting a <br>.');
     L.push('- ' + AI_LATEX_NOTATION_RULE);
     L.push('- Do NOT include the question number prefix (e.g. "20.", "Q7)") in the question text.');
-    L.push('- If the question contains a diagram/figure/graph, insert the placeholder [image here: <very short description>] at its exact position in the question text — do not try to describe the figure in full.');
+    L.push('- QUESTION FIELD vs OPTIONS (critical): the "question_html" field must contain ONLY the question stem/body (the problem statement, any statements/lists/table it refers to, and the [image here] placeholder for a figure). Do NOT put any of the four answer OPTIONS\' text inside the question field — the options belong ONLY in the options array. This applies even when the printed layout places options right under the stem: stop the question text before the first option. (Exception: for match-the-list questions the two Lists are part of the stem/table and DO belong in the question; the four code combinations are the options.)');
+    L.push('- IGNORE ANSWER-MARKING ARTIFACTS & HAND MARKS (critical): the crop may contain marks that are NOT part of the printed question — a tick/check (\u2713), cross (\u2717/\u00d7), circle, underline, arrow, tick/cross next to an option, highlighter, or any handwriting / hand-drawn scribble / pen or pencil annotation overlaid on the page. Do NOT transcribe, describe, or reproduce ANY of these marks anywhere (not in the question, options, figure placeholder, or explanation). Transcribe only the original printed text/figure as it was published. You MAY still use such a mark privately as a hint for which option is correct, but never output the mark itself.');
+    L.push('- If the question contains a diagram/figure/graph, insert the placeholder [image here: <very short description>] at its exact position in the question text — do not try to describe the figure in full. Do not include any hand-drawn marks/ticks/crosses in that figure description.');
     L.push('- MATCH-THE-LIST / MATCH-THE-COLUMNS / TABLE questions: if the question presents two lists to be matched (e.g. "List-I / List-II", "Column A / Column B", or says "Match the following"), OR already contains a tabular layout, render that matching data as a clean HTML <table> inside the question text at the position where it appears, NOT as loose <br> lines. Rules for the table: '
         + '(a) build a proper <table> with a header row <thead><tr><th>...</th></tr></thead> using the lists own headings (e.g. "List-I (Nuclear Power Plant)" and "List-II (State)"); '
         + '(b) keep each list item TOGETHER in a SINGLE cell exactly as printed, INCLUDING its own label — put "A. Kudankulam" in one cell and "1. Karnataka" in the adjacent cell on the SAME row. Do NOT split the letter/number label into its own separate column, and do NOT create extra columns for the A/B/C/D or 1/2/3/4 markers; '
@@ -8105,17 +8135,19 @@ async function qxExtract() {
         if (isNaN(ci) || ci < 0 || ci >= p.options.length) ci = 0;
 
         const isBi = p.language === 'bilingual' && Array.isArray(p.options_hi) && p.options_hi.length;
+        const enOpts = p.options.map(o => String(o == null ? '' : o));
+        const hiOpts = isBi ? p.options_hi.map(o => String(o == null ? '' : o)) : [];
         qxState.result = {
             language: (p.language === 'hi' || p.language === 'bilingual') ? p.language : 'en',
-            question: String(p.question_html),
-            options: p.options.map(o => String(o == null ? '' : o)),
+            question: qxStripArtifacts(String(p.question_html), enOpts),
+            options: enOpts,
             correct: ci,
             confidence: /^(high|medium|low)$/i.test(p.confidence || '') ? p.confidence.toLowerCase() : 'medium',
             note: String(p.note || '').trim(),
             explanation: String(p.explanation_html || ''),
             hi: isBi ? {
-                question: String(p.question_html_hi || ''),
-                options: p.options_hi.map(o => String(o == null ? '' : o)),
+                question: qxStripArtifacts(String(p.question_html_hi || ''), hiOpts),
+                options: hiOpts,
                 explanation: String(p.explanation_html_hi || ''),
             } : null,
         };
@@ -9014,7 +9046,9 @@ const QX_TRANSCRIBE_PROMPT =
     'Write mathematical content as LaTeX between $...$ delimiters — and ALL superscripts, subscripts and degree symbols, in math AND non-math text alike, as LaTeX too: powers $x^2$/$10^{-3}$, units $m^2$/$km^2$, chemical formulas $H_2O$/$CO_2$/$SO_4^{2-}$, ions $Na^+$, isotopes $^{235}U$, degrees/temperatures/coordinates $45^\\circ$/$30^\\circ C$/$23.5^\\circ N$, indexed terms $a_n$. Multi-character scripts need braces ($10^{-3}$). Never output raw Unicode script/degree characters (\u00b2 \u2082 \u00b0 etc.) or <sub>/<sup> tags — convert them to LaTeX. ' +
     'If a diagram/figure/graph appears, write [image here: <very short description>] at its position. ' +
     'If the image contains a TABLE, matched lists (List-I / List-II, Column A / Column B, "Match the following"), or any tabular/grid data, transcribe it as a Markdown table (rows with | pipes and a header separator) so its row/column structure is preserved — keep each list item together with its own label in one cell (e.g. "A. Kudankulam" in one cell, "1. Karnataka" in the next), and do NOT split the A./B. or 1./2. markers into separate columns. ' +
-    'Include any printed answer marking. Output ONLY the raw transcription — no commentary.';
+    'IGNORE any marks that are NOT part of the printed question: ticks/check marks (\u2713), crosses (\u2717/\u00d7), circles, underlines, arrows, highlighter, and ANY handwriting or hand-drawn scribbles/annotations overlaid on the page — do NOT transcribe or describe them. Transcribe only the original printed text and figures. ' +
+    'Keep the question stem and the answer options clearly separated (transcribe the stem, then the options in order); do not merge option text into the stem. ' +
+    'Include a printed/typeset answer key if present (e.g. a typeset "Answer (1)" line), but NOT hand-drawn ticks/crosses/circles/scribbles. Output ONLY the raw transcription — no commentary.';
 
 async function qxGeminiTranscribe(imageB64) {
     const visionModel = qxPools.visionModel || QX_VISION_MODEL_DEFAULT;
