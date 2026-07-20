@@ -808,6 +808,17 @@
                         <span class="text-gray-400">Called via the Gemini API with your Gemini pool keys — its quota is separate from the generation model's.</span>
                         </div>
                     </div>
+                    <div id="qx-figure-cfg-row" class="text-[11px] bg-white border border-gray-200 rounded-lg px-3 py-2">
+                        <div class="flex items-center gap-2 flex-wrap">
+                        <label class="text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Figure image model (AI figure extraction)</label>
+                        <select id="qx-figure-model" class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-rose-400">
+                            <!-- options rendered by JS -->
+                        </select>
+                        <input type="text" id="qx-figure-model-custom" placeholder="custom image model id"
+                               class="hidden text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-rose-400">
+                        <span class="text-gray-400">When a question contains a figure (graph, circuit, table…), this image-output model reproduces it as a clean standalone image. On save it is uploaded to GitHub &amp; served via jsDelivr using the <b>Figure Updater tab → Image Hosting</b> settings.</span>
+                        </div>
+                    </div>
                     <div id="qx-keys-list" class="space-y-2"><!-- key rows rendered by JS --></div>
                     <p class="text-[11px] text-gray-400 leading-relaxed" id="qx-pool-hint">
                         Keys are tried <b>in order</b>. When a request returns a quota/limit error, that key is
@@ -887,6 +898,10 @@
                         <input type="checkbox" id="qx-steps" checked class="accent-rose-600">
                         <i data-lucide="list-ordered" class="w-3.5 h-3.5 text-rose-500"></i> Step-by-step math
                     </label>
+                    <label class="flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-xl px-3 flex-shrink-0 cursor-pointer" title="If the question contains a figure/diagram, reproduce it with the AI image model and attach it (uploaded to GitHub + jsDelivr on save)">
+                        <input type="checkbox" id="qx-figures" checked class="accent-rose-600">
+                        <i data-lucide="image" class="w-3.5 h-3.5 text-rose-500"></i> AI figures
+                    </label>
                     <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 flex-shrink-0" title="How thorough the generated explanation should be">
                         <label class="text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Explanation</label>
                         <select id="qx-detail" class="text-sm border-0 bg-transparent py-2 focus:outline-none">
@@ -918,6 +933,23 @@
                         <p id="qx-ai-note" class="text-xs text-gray-500 flex-1 min-w-[200px]"></p>
                     </div>
                     <div id="qx-preview-panel" class="hidden"><!-- student-facing preview (rendered by JS) --></div>
+                    <div id="qx-figure-box" class="hidden rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+                        <div class="flex items-center gap-2 flex-wrap mb-2">
+                            <i data-lucide="image" class="w-4 h-4 text-amber-600"></i>
+                            <p class="text-xs font-bold text-gray-700">Question figure (AI-extracted)</p>
+                            <span id="qx-figure-status" class="ai-status-chip off"></span>
+                            <div class="ml-auto flex items-center gap-2">
+                                <button type="button" id="qx-figure-regen" class="text-[11px] bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 font-bold py-1 px-2.5 rounded-lg flex items-center gap-1">
+                                    <i data-lucide="refresh-cw" class="w-3 h-3"></i> Regenerate
+                                </button>
+                                <button type="button" id="qx-figure-remove" class="text-[11px] bg-white hover:bg-red-50 text-red-500 border border-red-200 font-bold py-1 px-2.5 rounded-lg flex items-center gap-1">
+                                    <i data-lucide="x" class="w-3 h-3"></i> Remove
+                                </button>
+                            </div>
+                        </div>
+                        <img id="qx-figure-img" class="qx-figure-img hidden" alt="extracted figure">
+                        <p id="qx-figure-note" class="text-[11px] text-gray-500 mt-2 leading-relaxed"></p>
+                    </div>
                     <div id="qx-fields"><!-- primary language fields (rendered by JS) --></div>
                     <div id="qx-fields-hi" class="hidden border-t border-gray-100 pt-4"><!-- hindi fields --></div>
                     <div class="flex items-center gap-2 flex-wrap pt-1">
