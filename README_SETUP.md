@@ -138,6 +138,40 @@ the substance to the required depth.
 
 ---
 
+## AI figure extraction (graphs, circuits, tables → GitHub + jsDelivr)
+
+For questions whose crop contains a **figure** — a graph, circuit diagram,
+truth table, labelled illustration (common in NEET/JEE physics) — the
+extractor can now reproduce the figure as its own image and attach it to
+the question:
+
+1. Keep the **AI figures** toggle (next to Step-by-step math) checked.
+   When the extracted question contains an `[image here: …]` placeholder,
+   the crop is automatically sent to the **figure image model** (default
+   `gemini-3.1-flash-lite-image`, changeable in Extractor API Settings
+   incl. a custom id) which generates ONLY the figure as a clean
+   standalone image — question text, options and answer markings excluded.
+   The call runs through the same Gemini key pool with limit rotation.
+2. The generated figure previews in the review panel with **Regenerate**
+   and **Remove** buttons and a status chip; the review stays fully usable
+   while it generates.
+3. On **Save to Question Bank**, the figure is uploaded to GitHub using
+   the **Figure Updater tab → Image Hosting** settings (repo / branch /
+   folder / token) and the `[image here]` placeholder in the question
+   (both languages) is replaced by the standard
+   `<img class="aimcq-question-image">` tag pointing at the **jsDelivr
+   CDN** URL — identical markup to what the Figure Updater produces.
+4. If Image Hosting is not configured (or the upload fails), the question
+   is saved with its placeholder intact so you can attach an image later
+   via the Figure Updater tab; the panel tells you which case you're in.
+
+Current scope: one figure per question (the main figure the question body
+refers to). Questions whose *options* are figures (e.g. four graph
+options) still extract their text/placeholders normally — attach those
+per-option images via the Figure Updater tab.
+
+---
+
 ## Step-by-step math solutions
 
 Both the **AI Analysis** panel (Question Editor) and the **Question Extractor**
@@ -247,7 +281,16 @@ exam papers. Workflow:
 6. **Export JSON** downloads the currently viewed scope — the selected
    library (filename includes the library name, JSON includes a `library`
    field) or all libraries together — in the standard question JSON
-   format (`posts` with `_aimcq_options`, `_aimcq_correct_answers`,
+   format, with the **`terms` array populated per library**: `taxonomy`
+   and `name` are the library name, `slug` is its slug (Devanagari
+   preserved), and `language`/`language_code` reflect the generated
+   language of that library's questions — `English`/`01EN`,
+   `Hindi`/`01HI`, or `English & Hindi`/`01ENHI` (any bilingual question, or a
+   mix of English and Hindi questions, makes the library `01ENHI`). Every
+   exported post also references its library term via
+   `taxonomies: { "<Library Name>": ["<library-slug>"] }`; an
+   all-libraries export contains one term per library, each with its own
+   code (`posts` with `_aimcq_options`, `_aimcq_correct_answers`,
    `_aimcq_explanation`, plus `_hi` fields for bilingual) — directly usable
    in the Question Editor, Quiz Builder, and Figure Updater tabs.
 
