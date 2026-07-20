@@ -192,6 +192,27 @@ and ignore the toggle.)
 
 ---
 
+## Cleaner extraction — no leaked options, no answer-mark artifacts
+
+Two extraction refinements:
+
+- **Options stay out of the question field.** The question field holds only
+  the stem/body (problem statement, any statements/lists/table it refers
+  to, and the figure placeholder) — never the four options' text, even when
+  the printed layout places options right under the stem. A safety net also
+  strips any option lines that leak into the question. (For match-the-list
+  questions the two Lists remain part of the stem/table; only the code
+  combinations are the options.)
+- **Answer-marking artifacts are ignored.** Tick/check marks, crosses,
+  circles, underlines, arrows, highlighter and any handwriting or
+  hand-drawn scribbles overlaid on the crop are not transcribed or
+  described anywhere. Only the original printed text/figure is captured
+  (a printed/typeset "Answer (x)" key is still respected). The model may
+  use a hand mark privately as a hint for the correct option but never
+  outputs the mark itself.
+
+---
+
 ## Match-the-list & table questions
 
 The Question Extractor now handles **match-the-list / match-the-columns**
