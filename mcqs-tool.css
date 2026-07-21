@@ -1473,3 +1473,51 @@
     border: 1px solid #d1d5db; padding: 5px 10px; text-align: left; vertical-align: top;
 }
 .qx-prev-q table th, .qx-prev-katex table th { background: #f3f4f6; font-weight: 700; }
+
+/* ===== Question Extractor — document tabs (multi-PDF/image canvas) ===== */
+.qx-doc-tabs {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    margin-bottom: 12px; padding-bottom: 10px;
+    border-bottom: 1px solid #334155;
+}
+.qx-doc-tab {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #334155; color: #cbd5e1;
+    border: 1px solid #475569; border-radius: 9px 9px 0 0;
+    padding: 5px 8px 5px 10px; font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
+    max-width: 260px;
+}
+.qx-doc-tab:hover { background: #3f4d63; }
+.qx-doc-tab.active {
+    background: #f43f5e; color: #fff; border-color: #e11d48;
+    box-shadow: 0 2px 8px rgba(244,63,94,0.35);
+}
+.qx-doc-tab.active .qx-doc-tab-lang { color: #fff; border-color: rgba(255,255,255,0.5); background: rgba(255,255,255,0.14); }
+.qx-doc-tab.active .qx-doc-tab-close { color: #ffe4e6; }
+.qx-doc-tab-name {
+    max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.qx-doc-tab-lang {
+    font-size: 10.5px; font-weight: 700; color: #cbd5e1;
+    background: #1e293b; border: 1px solid #475569; border-radius: 6px;
+    padding: 1px 4px; cursor: pointer; outline: none;
+    -webkit-appearance: none; appearance: none;
+}
+.qx-doc-tab-lang option { color: #111827; }
+.qx-doc-tab-close {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 4px;
+    font-size: 15px; line-height: 1; color: #94a3b8;
+    background: transparent; border: none; cursor: pointer; padding: 0;
+    transition: background 0.15s, color 0.15s;
+}
+.qx-doc-tab-close:hover { background: rgba(255,255,255,0.18); color: #fff; }
+.qx-doc-add {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: transparent; color: #94a3b8;
+    border: 1px dashed #475569; border-radius: 9px;
+    padding: 5px 10px; font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.qx-doc-add:hover { background: #334155; color: #e2e8f0; border-color: #64748b; }
