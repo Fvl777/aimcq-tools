@@ -6958,34 +6958,14 @@ async function aiGeminiRequest(prompt, opts) {
             : { temperature: 0.2, responseMimeType: 'application/json' }
     };
 
-    // Hard timeout: without it a stalled connection hangs forever and the UI
-    // shows "Reading image…" with no result. Default 120s; callers can pass
-    // opts.timeoutMs (e.g. transcription uses a tighter limit).
-    const timeoutMs = Math.max(10000, opts.timeoutMs || 120000);
-    const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-    const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
-
-    let resp;
-    try {
-        resp = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-goog-api-key': key,
-            },
-            body: JSON.stringify(body),
-            ...(ctrl ? { signal: ctrl.signal } : {}),
-        });
-    } catch (e) {
-        if (timer) clearTimeout(timer);
-        if (e && (e.name === 'AbortError' || /abort/i.test(e.message || ''))) {
-            const err = new Error(`The AI request timed out after ${Math.round(timeoutMs / 1000)}s — the API did not respond. Try again (or switch model/key in the settings).`);
-            err.timeout = true;
-            throw err;
-        }
-        throw e;
-    }
-    if (timer) clearTimeout(timer);
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': key,
+        },
+        body: JSON.stringify(body)
+    });
 
     if (!resp.ok) {
         let detail = '', reason = '', gstatus = '';
@@ -7657,8 +7637,6 @@ const qxState = {
     scale: 1, fitDispW: 0, fitDispH: 0,
     rendering: false, pendingPage: null,
     cropper: null,
-    docs: [],              // open documents (tabs): [{id, name, kind:'pdf'|'image', pdfDoc?, img?, pageNum, scale, numPages}]
-    activeDocIdx: -1,      // index into docs of the tab currently shown
     result: null,          // current AI extraction under review
     cropThumb: '',         // small dataURL of the crop (stored with record)
     crops: [],             // queued crops for a multi-part question: [{b64, thumb}]
@@ -7930,6 +7908,39 @@ function qxRenderPdfContinuous(startNum) {
     if (cp) cp.textContent = last > startNum ? (startNum + '\u2013' + last) : String(startNum);
 }
 
+function qxRenderImage(file) {
+    const canvas = document.getElementById('qx-canvas');
+    if (!canvas) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = function () {
+        const natW = img.naturalWidth || 1, natH = img.naturalHeight || 1;
+        canvas.width = natW; canvas.height = natH;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, natW, natH);
+        ctx.drawImage(img, 0, 0, natW, natH);
+        URL.revokeObjectURL(url);
+        const scroll = document.getElementById('qx-pdf-scroll');
+        const containerWidth = Math.max(scroll.clientWidth - 4, 200);
+        qxState.fitDispW = Math.min(natW, containerWidth);
+        qxState.fitDispH = qxState.fitDispW * (natH / natW);
+        qxState.srcType = 'image';
+        qxState.pdfDoc = null;
+        qxState.pageNum = 1;
+        if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
+        qxApplyZoom();
+        qxEnableCropper();
+        document.getElementById('qx-cur-page').textContent = '1';
+        document.getElementById('qx-total-pages').textContent = '1';
+        qxUpdateNav();
+    };
+    img.onerror = function () {
+        URL.revokeObjectURL(url);
+        showToast('Image error', 'Could not load that image file.', 'error');
+    };
+    img.src = url;
+}
+
 function qxUpdateNav() {
     const isImg = qxState.srcType === 'image';
     const prev = document.getElementById('qx-prev-page');
@@ -7943,138 +7954,6 @@ function qxShowWorkspace() {
     document.getElementById('qx-source-pick').classList.add('hidden');
 }
 
-// ---------- multi-document tabs ----------
-// Several PDFs/images can be open at once as tabs above the canvas — e.g. a
-// question bank whose ENGLISH paper is one PDF and whose HINDI paper is a
-// second PDF. Combined with the multi-crop queue this lets one question be
-// assembled from different files: crop the English version in tab 1, "Add
-// crop", switch to tab 2, crop the Hindi version, then Extract (bilingual).
-// Each tab remembers its own page number and zoom. The legacy single-doc
-// fields on qxState (pdfDoc/srcType/pageNum/scale) always mirror the ACTIVE
-// tab, so all existing rendering/nav/crop code keeps working unchanged.
-let qxDocSeq = 1;
-
-function qxActiveDoc() {
-    return qxState.docs[qxState.activeDocIdx] || null;
-}
-
-// Persist the current view state (page, zoom) back into the active tab.
-function qxSyncActiveDocState() {
-    const d = qxActiveDoc();
-    if (!d) return;
-    d.pageNum = qxState.pageNum;
-    d.scale = qxState.scale;
-}
-
-// Load a tab's state into the legacy fields and render it.
-function qxActivateDoc(idx, opts) {
-    opts = opts || {};
-    if (idx < 0 || idx >= qxState.docs.length) return;
-    if (!opts.skipSync) qxSyncActiveDocState();
-    qxState.activeDocIdx = idx;
-    const d = qxState.docs[idx];
-    qxState.pdfDoc = d.kind === 'pdf' ? d.pdfDoc : null;
-    qxState.srcType = d.kind;
-    qxState.pageNum = d.pageNum || 1;
-    qxState.scale = d.scale || 1;
-    if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
-    document.getElementById('qx-total-pages').textContent = d.kind === 'pdf' ? d.numPages : '1';
-    qxRenderDocTabs();
-    qxUpdateNav();
-    if (d.kind === 'pdf') {
-        qxRenderPdfPage(qxState.pageNum);
-    } else {
-        qxRenderImageDoc(d);
-    }
-}
-
-// Register a freshly loaded document as a new tab and switch to it.
-function qxAddDoc(doc) {
-    qxSyncActiveDocState();
-    qxState.docs.push(doc);
-    qxShowWorkspace();
-    qxActivateDoc(qxState.docs.length - 1, { skipSync: true });
-}
-
-// Close a tab. Its queued crops (if any) are kept — they are page snapshots,
-// independent of the source document.
-function qxCloseDoc(idx) {
-    if (idx < 0 || idx >= qxState.docs.length) return;
-    qxSyncActiveDocState();
-    const closing = qxState.docs[idx];
-    try { if (closing.kind === 'pdf' && closing.pdfDoc && closing.pdfDoc.destroy) closing.pdfDoc.destroy(); } catch (e) {}
-    qxState.docs.splice(idx, 1);
-
-    if (!qxState.docs.length) {
-        // Last tab closed → back to the source picker.
-        if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
-        qxState.pdfDoc = null; qxState.srcType = ''; qxState.activeDocIdx = -1;
-        qxRenderDocTabs();
-        document.getElementById('qx-workspace').classList.add('hidden');
-        document.getElementById('qx-source-pick').classList.remove('hidden');
-        return;
-    }
-    let next = qxState.activeDocIdx;
-    if (idx < next) next--;                       // active shifted left
-    else if (idx === next) next = Math.min(idx, qxState.docs.length - 1);   // closed the active tab
-    qxState.activeDocIdx = -1;                    // force full re-activate (no sync of a dead tab)
-    qxActivateDoc(next, { skipSync: true });
-}
-
-function qxRenderDocTabs() {
-    const bar = document.getElementById('qx-doc-tabs');
-    if (!bar) return;
-    if (!qxState.docs.length) { bar.classList.add('hidden'); bar.innerHTML = ''; return; }
-    bar.classList.remove('hidden');
-    const icon = k => k === 'pdf' ? 'file-text' : 'image';
-    let html = qxState.docs.map((d, i) => `
-        <button type="button" class="qx-doc-tab ${i === qxState.activeDocIdx ? 'active' : ''}" data-idx="${i}" title="${qxEsc(d.name)}${d.kind === 'pdf' ? ` — ${d.numPages} pages` : ''}">
-            <i data-lucide="${icon(d.kind)}" class="w-3.5 h-3.5"></i>
-            <span class="qx-doc-tab-name">${qxEsc(d.name)}</span>
-            <span class="qx-doc-tab-close" data-close="${i}" title="Close this file">&times;</span>
-        </button>`).join('');
-    html += `
-        <button type="button" class="qx-doc-tab add" id="qx-doc-tab-add" title="Open another PDF or image in a new tab — e.g. the same question bank in another language. Crops can be combined across tabs with 'Add crop'.">
-            <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add file
-        </button>`;
-    bar.innerHTML = html;
-
-    bar.querySelectorAll('.qx-doc-tab[data-idx]').forEach(t => t.addEventListener('click', (ev) => {
-        const closeIdx = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-close');
-        if (closeIdx != null) { ev.stopPropagation(); qxCloseDoc(parseInt(closeIdx, 10)); return; }
-        const i = parseInt(t.getAttribute('data-idx'), 10);
-        if (i !== qxState.activeDocIdx) qxActivateDoc(i);
-    }));
-    const addBtn = document.getElementById('qx-doc-tab-add');
-    if (addBtn) addBtn.addEventListener('click', () => {
-        const inp = document.getElementById('qx-add-file');
-        if (inp) inp.click();
-    });
-    try { lucide.createIcons(); } catch (e) {}
-}
-
-// Draw an image tab's (already loaded) Image element onto the canvas.
-function qxRenderImageDoc(d) {
-    const canvas = document.getElementById('qx-canvas');
-    if (!canvas || !d || !d.img) return;
-    const img = d.img;
-    const natW = img.naturalWidth || 1, natH = img.naturalHeight || 1;
-    canvas.width = natW; canvas.height = natH;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, natW, natH);
-    ctx.drawImage(img, 0, 0, natW, natH);
-    const scroll = document.getElementById('qx-pdf-scroll');
-    const containerWidth = Math.max(scroll.clientWidth - 4, 200);
-    qxState.fitDispW = Math.min(natW, containerWidth);
-    qxState.fitDispH = qxState.fitDispW * (natH / natW);
-    if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
-    qxApplyZoom();
-    qxEnableCropper();
-    document.getElementById('qx-cur-page').textContent = '1';
-    document.getElementById('qx-total-pages').textContent = '1';
-    qxUpdateNav();
-}
-
 function qxLoadPdfFile(file) {
     if (typeof pdfjsLib === 'undefined') {
         showToast('PDF engine missing', 'pdf.js failed to load — refresh and try again.', 'error');
@@ -8085,43 +7964,16 @@ function qxLoadPdfFile(file) {
         const docParams = { data: new Uint8Array(e.target.result) };
         if (window.pdfjsWorkerDisabled) docParams.disableWorker = true;
         pdfjsLib.getDocument(docParams).promise.then(doc => {
-            qxAddDoc({
-                id: qxDocSeq++,
-                name: file.name || 'document.pdf',
-                kind: 'pdf',
-                pdfDoc: doc,
-                numPages: doc.numPages,
-                pageNum: 1,
-                scale: 1,
-            });
+            qxState.pdfDoc = doc;
+            qxState.pageNum = 1;
+            qxState.scale = 1;
+            document.getElementById('qx-total-pages').textContent = doc.numPages;
+            qxShowWorkspace();
+            qxUpdateNav();
+            qxRenderPdfPage(1);
         }).catch(err => showToast('PDF error', err.message || String(err), 'error'));
     };
     reader.readAsArrayBuffer(file);
-}
-
-// Load an image file as a new tab. The decoded Image element is kept on the
-// tab entry (loaded from a dataURL, so it stays valid for re-rendering when
-// the user switches back to this tab).
-function qxLoadImageFile(file) {
-    const reader = new FileReader();
-    reader.onload = e => {
-        const img = new Image();
-        img.onload = function () {
-            qxAddDoc({
-                id: qxDocSeq++,
-                name: file.name || 'image',
-                kind: 'image',
-                img,
-                numPages: 1,
-                pageNum: 1,
-                scale: 1,
-            });
-        };
-        img.onerror = function () { showToast('Image error', 'Could not load that image file.', 'error'); };
-        img.src = e.target.result;
-    };
-    reader.onerror = () => showToast('Image error', 'Could not read that image file.', 'error');
-    reader.readAsDataURL(file);
 }
 
 function qxGetCropCanvas(opts) {
@@ -8159,7 +8011,7 @@ function qxAddCrop() {
     const thumb = qxScaleCanvas(crop, 300).toDataURL('image/jpeg', 0.7);
     qxState.crops.push({ b64, thumb });
     qxRenderCropQueue();
-    showToast('Crop added', `${qxState.crops.length} crop${qxState.crops.length > 1 ? 's' : ''} queued. Turn the page or switch file tab (e.g. the other-language PDF), select more, then Extract to combine them into one question.`, 'success');
+    showToast('Crop added', `${qxState.crops.length} crop${qxState.crops.length > 1 ? 's' : ''} queued. Turn the page / select more, then Extract to combine them into one question.`, 'success');
 }
 
 function qxRemoveCrop(idx) {
@@ -8195,7 +8047,7 @@ function qxRenderCropQueue() {
             <button type="button" id="qx-crop-clear" class="qx-crop-queue-clear">Clear all</button>
         </div>
         <div class="qx-crop-queue-strip">${items}</div>
-        <p class="qx-crop-queue-hint">These will be combined into a single question when you click Extract (the current on-screen selection, if any, is added last). You can add crops from any page and any open file tab — e.g. English from one PDF, Hindi from another.</p>`;
+        <p class="qx-crop-queue-hint">These will be combined into a single question when you click Extract (the current on-screen selection, if any, is added last).</p>`;
     wrap.querySelectorAll('.qx-crop-queue-del').forEach(b =>
         b.addEventListener('click', () => qxRemoveCrop(parseInt(b.getAttribute('data-idx'), 10))));
     const clr = document.getElementById('qx-crop-clear');
@@ -8218,13 +8070,38 @@ function qxScaleCanvas(src, max) {
 }
 
 // ---------- extraction ----------
+// Safety net: strip a leading QUESTION-NUMBER prefix that the cropped image
+// carried into the stem (e.g. "20.", "Q7)", "Q. 15", "(20)", "प्रश्न 12.").
+// The prompt already instructs the model to omit it, but it occasionally
+// leaks; this removes only a number prefix at the very start of the field.
+// It is deliberately conservative so it never touches legitimate content:
+//   - years / long numbers (4+ digits) are left alone;
+//   - decimals like "3.14" are left alone (no separator+space follows);
+//   - a leading percentage/measurement like "20% of ..." is left alone
+//     (no "." / ")" separator right after the number);
+//   - only a single prefix at the absolute start (after any opening tag)
+//     is removed, so an internal "1./2." statement list is never affected.
+function qxStripLeadingQNumber(html) {
+    if (!html) return html;
+    // Skip any leading opening block/inline tags, then match an optional
+    // question word (Q / Que / Ques / Question / प्र / प्रश्न), then the
+    // number as either "(n)" or "n." / "n)", then required trailing space.
+    const re = /^(\s*(?:<(?:p|div|span|b|i|strong|em)\b[^>]*>\s*)*)(?:(?:Q(?:ues?|uestion)?|प्र(?:श्न)?)\.?\s*(?:\(\s*\d{1,3}\s*\)|\d{1,3})\s*[.):]?(?:&nbsp;|\s)+|(?:\(\s*\d{1,3}\s*\)|\d{1,3}\s*[.):])(?:&nbsp;|\s)+)/i;
+    const stripped = html.replace(re, '$1');
+    // Guard: never blank out the field — if nothing meaningful remains,
+    // the match was probably the whole (short) content, so keep the original.
+    if (stripped.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim().length === 0)
+        return html;
+    return stripped;
+}
+
 // Safety net: strip answer-marking artifacts (stray tick/cross/marks) and
 // any leaked answer-option text from a question field. The prompt already
 // instructs the model to omit these; this cleans up the occasional leak
 // without touching legitimate content (tables, figures, statements).
 function qxStripArtifacts(html, options) {
     if (!html) return html;
-    let out = html;
+    let out = qxStripLeadingQNumber(html);
     // 1) Remove stray standalone tick/cross/checkbox artifact glyphs that are
     //    not part of normal prose. Only remove when isolated (surrounded by
     //    whitespace/tags/limits), so we never touch a legit × in "2 × 10^3".
@@ -8263,7 +8140,7 @@ function qxBuildPrompt(langMode, transcript, wantSteps, detailLevel) {
     L.push(`- ${transcript ? 'Reconstruct the question text EXACTLY as transcribed (fix only obvious OCR-level artifacts)' : 'Transcribe the question text EXACTLY as printed (fix only obvious OCR-level artifacts)'}. Use minimal clean HTML (<b>, <i>, <br>) — do NOT use <sub>/<sup> tags (see the NOTATION rule below).`);
     L.push('- LINE BREAKS (critical — do NOT copy the image\'s visual word-wrap): only insert a <br> where there is a genuine logical break — a new labeled statement/point (A./B./I./II./1./2. etc.), a distinct sentence that is clearly a separate line/point by the author\'s intent, or a real paragraph break. If a sentence merely wraps to the next visual line in the source because of column/page width, that is NOT a break — join the wrapped words back into ONE continuous line with a single space (do not insert <br>, and do not preserve a line break just because the source image had one there). When in doubt whether a break is logical or just word-wrap, prefer joining the text into one continuous line/sentence over inserting a <br>.');
     L.push('- ' + AI_LATEX_NOTATION_RULE);
-    L.push('- Do NOT include the question number prefix (e.g. "20.", "Q7)") in the question text.');
+    L.push('- Do NOT include the question number / serial number at the START of the question text in ANY form — e.g. "20.", "20)", "(20)", "Q7", "Q.7", "Q7)", "Que 7.", "Question 7:", or Hindi "प्रश्न 7." / "प्र. 7". Begin "question_html" directly with the first real word of the question stem. (This applies ONLY to the leading paper question-number; genuine numbers inside the question — statement lists "1./2.", values, years, units — are kept as printed.)');
     L.push('- QUESTION FIELD vs OPTIONS (critical): the "question_html" field must contain ONLY the question stem/body (the problem statement, any statements/lists/table it refers to, and the [image here] placeholder for a figure). Do NOT put any of the four answer OPTIONS\' text inside the question field — the options belong ONLY in the options array. This applies even when the printed layout places options right under the stem: stop the question text before the first option. (Exception: for match-the-list questions the two Lists are part of the stem/table and DO belong in the question; the four code combinations are the options.)');
     L.push('- IGNORE ANSWER-MARKING ARTIFACTS & HAND MARKS (critical): the crop may contain marks that are NOT part of the printed question — a tick/check (\u2713), cross (\u2717/\u00d7), circle, underline, arrow, tick/cross next to an option, highlighter, or any handwriting / hand-drawn scribble / pen or pencil annotation overlaid on the page. Do NOT transcribe, describe, or reproduce ANY of these marks anywhere (not in the question, options, figure placeholder, or explanation). Transcribe only the original printed text/figure as it was published. You MAY still use such a mark privately as a hint for which option is correct, but never output the mark itself.');
     L.push('- If the question contains a diagram/figure/graph, insert the placeholder [image here: <very short description>] at its exact position in the question text — do not try to describe the figure in full. Do not include any hand-drawn marks/ticks/crosses in that figure description.');
@@ -8341,7 +8218,7 @@ function qxBuildPassagePrompt(langMode, transcript, wantSteps, detailLevel) {
     L.push(`- ${transcript ? 'Reconstruct each question text EXACTLY as transcribed (fix only obvious OCR-level artifacts)' : 'Transcribe each question text EXACTLY as printed (fix only obvious OCR-level artifacts)'}. Use minimal clean HTML (<b>, <i>, <br>) — do NOT use <sub>/<sup> tags (see the NOTATION rule below).`);
     L.push('- LINE BREAKS (critical — do NOT copy the image\'s visual word-wrap): only insert a <br> where there is a genuine logical break. If a sentence merely wraps to the next visual line because of column/page width, join the wrapped words back into ONE continuous line with a single space. When in doubt, join.');
     L.push('- ' + AI_LATEX_NOTATION_RULE);
-    L.push('- Do NOT include the question number prefix (e.g. "12.", "Q7)") in any question text.');
+    L.push('- Do NOT include each question\'s own number / serial number at the START of its "question_html" in ANY form — e.g. "12.", "12)", "(12)", "Q12", "Q.12", "Q12)", "Question 12:", or Hindi "प्रश्न 12." / "प्र. 12". Begin every question with the first real word of its stem. (Genuine numbers inside a question — statement lists "1./2.", values, years, units — are kept. The question-number RANGE still belongs in the "directions" line as instructed above.)');
     L.push('- QUESTION FIELD vs OPTIONS (critical): "question_html" must contain ONLY the question stem — never any of the answer options\' text. The options belong ONLY in the options array.');
     L.push('- IGNORE ANSWER-MARKING ARTIFACTS & HAND MARKS (critical): ticks/checks (\u2713), crosses (\u2717/\u00d7), circles, underlines, arrows, highlighter, and ANY handwriting or hand-drawn scribbles overlaid on the page are NOT part of the printed content — never transcribe, describe, or reproduce them anywhere (passage, questions, options, or explanations). You MAY use such a mark privately as a hint for which option is correct, but never output the mark itself.');
     L.push('- Transcribe ALL options of each question in order, WITHOUT their labels ("(1)", "(a)", "A." etc.).');
@@ -9201,7 +9078,8 @@ async function qxExportBank() {
         imgIn.addEventListener('change', e => {
             const f = e.target.files[0];
             if (!f) return;
-            qxLoadImageFile(f);
+            qxShowWorkspace();
+            qxRenderImage(f);
             imgIn.value = '';
         });
 
@@ -9225,26 +9103,10 @@ async function qxExportBank() {
         document.getElementById('qx-zoom-reset').addEventListener('click', () => { qxState.scale = 1; qxApplyZoom(); });
         document.getElementById('qx-change-file').addEventListener('click', () => {
             if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
-            qxState.docs.forEach(d => { try { if (d.kind === 'pdf' && d.pdfDoc && d.pdfDoc.destroy) d.pdfDoc.destroy(); } catch (e) {} });
-            qxState.docs = []; qxState.activeDocIdx = -1;
-            qxRenderDocTabs();
             qxState.pdfDoc = null; qxState.srcType = '';
             if (qxState.crops.length) { qxState.crops = []; qxRenderCropQueue(); }
             document.getElementById('qx-workspace').classList.add('hidden');
             document.getElementById('qx-source-pick').classList.remove('hidden');
-        });
-
-        // "+ Add file" tab → one hidden input accepting both PDFs and images,
-        // routed by type. Opens the file as an ADDITIONAL tab (e.g. the Hindi
-        // paper of a bank whose English paper is already open in tab 1).
-        const addFileIn = document.getElementById('qx-add-file');
-        if (addFileIn) addFileIn.addEventListener('change', e => {
-            const f = e.target.files[0];
-            if (!f) return;
-            if (f.type === 'application/pdf') qxLoadPdfFile(f);
-            else if (/^image\//.test(f.type || '')) qxLoadImageFile(f);
-            else showToast('Unsupported file', 'Choose a .pdf or an image file.', 'error');
-            addFileIn.value = '';
         });
 
         document.getElementById('qx-extract-btn').addEventListener('click', qxExtract);
@@ -9630,35 +9492,19 @@ function qxIsLimitError(err) {
 // ---------- DeepSeek transport (OpenAI-compatible) ----------
 async function aiDeepseekRequest(prompt, opts) {
     opts = opts || {};
-    const timeoutMs = Math.max(10000, opts.timeoutMs || 120000);
-    const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-    const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
-    let resp;
-    try {
-        resp = await fetch('https://api.deepseek.com/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + (opts.key || ''),
-            },
-            body: JSON.stringify({
-                model: opts.model || 'deepseek-v4-flash',
-                messages: [{ role: 'user', content: prompt }],
-                temperature: opts.plainText ? 0 : 0.2,
-                ...(opts.plainText ? {} : { response_format: { type: 'json_object' } }),
-            }),
-            ...(ctrl ? { signal: ctrl.signal } : {}),
-        });
-    } catch (e) {
-        if (timer) clearTimeout(timer);
-        if (e && (e.name === 'AbortError' || /abort/i.test(e.message || ''))) {
-            const err = new Error(`The AI request timed out after ${Math.round(timeoutMs / 1000)}s — the API did not respond. Try again.`);
-            err.timeout = true;
-            throw err;
-        }
-        throw e;
-    }
-    if (timer) clearTimeout(timer);
+    const resp = await fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + (opts.key || ''),
+        },
+        body: JSON.stringify({
+            model: opts.model || 'deepseek-v4-flash',
+            messages: [{ role: 'user', content: prompt }],
+            temperature: opts.plainText ? 0 : 0.2,
+            ...(opts.plainText ? {} : { response_format: { type: 'json_object' } }),
+        }),
+    });
     if (!resp.ok) {
         let detail = '';
         try { const j = await resp.json(); detail = (j.error && j.error.message) || ''; } catch (e) {}
@@ -9723,56 +9569,37 @@ const QX_TRANSCRIBE_PROMPT =
 
 async function qxGeminiTranscribe(images) {
     const visionModel = qxPools.visionModel || QX_VISION_MODEL_DEFAULT;
-    // `images` may be a single base64 string or an array of them. Multiple
-    // crops (a question continuing on another page, or the same question in a
-    // second language / second PDF) are read in ONE vision call with all the
-    // images attached — a single round-trip instead of N sequential calls,
-    // which is both much faster and far less likely to trip free-tier
-    // per-minute rate limits. If the vision model rejects the multi-image
-    // request, we fall back to reading the crops one by one (with progress).
+    // `images` may be a single base64 string or an array of them. When more
+    // than one crop is supplied (a question that continues onto another page,
+    // or the same question in a second language), each crop is transcribed on
+    // its own and the pieces are joined so the structuring step sees the whole
+    // question as one continuous input.
     const list = Array.isArray(images) ? images.filter(Boolean) : [images].filter(Boolean);
     if (!list.length) throw new Error('No crop to transcribe.');
-    const TRANSCRIBE_TIMEOUT = 90000;   // transcription is fast — fail a stalled call quickly
 
-    const callVision = async (prompt, imgOpts) => {
-        const opts = Object.assign({ plainText: true, imageMime: 'image/webp', timeoutMs: TRANSCRIBE_TIMEOUT, modelOverride: visionModel }, imgOpts);
+    const transcribeOne = async (b64) => {
+        // Prefer the extractor's Gemini pool (with failover); fall back to the
+        // Question Editor's Gemini key if the pool is empty. Always uses the
+        // dedicated vision model (default: gemma-4-31b-it) — independent of
+        // whichever Gemini model is selected for direct Gemini-mode extraction,
+        // so it draws on its own free-tier quota.
         if (qxPoolConfiguredKeys('gemini').length) {
-            const call = await qxAiCall(prompt, opts, 'gemini');
+            const call = await qxAiCall(QX_TRANSCRIBE_PROMPT,
+                { imageB64: b64, imageMime: 'image/webp', plainText: true, modelOverride: visionModel }, 'gemini');
             return call.text;
         }
         if (typeof aiConfigured === 'function' && aiConfigured()) {
-            delete opts.modelOverride;
-            opts.model = visionModel;
-            return aiGeminiRequest(prompt, opts);
+            return aiGeminiRequest(QX_TRANSCRIBE_PROMPT,
+                { imageB64: b64, imageMime: 'image/webp', plainText: true, model: visionModel });
         }
         throw new Error('DeepSeek mode needs a Gemini-API key for reading the image (DeepSeek has no image input). Add a Gemini key to the extractor pool, or configure the Question Editor\'s AI settings.');
     };
 
-    if (list.length === 1) return callVision(QX_TRANSCRIBE_PROMPT, { imageB64: list[0] });
+    if (list.length === 1) return transcribeOne(list[0]);
 
-    // ---- multi-crop: ONE call, all images attached ----
-    const multiPrompt =
-        `You are given ${list.length} images. They are crops of the SAME item (a single question, or a passage group with its questions, continuing across pages/files — possibly the same content in another language). ` +
-        `Transcribe EACH image separately, in the given order, and start each transcription with a header line exactly like "--- Crop 1 of ${list.length} ---", "--- Crop 2 of ${list.length} ---", and so on. ` +
-        'Within each crop, apply these transcription rules:\n' + QX_TRANSCRIBE_PROMPT;
-    try {
-        const text = await callVision(multiPrompt, { imagesB64: list });
-        if (text && text.trim()) {
-            return 'The following transcription comes from MULTIPLE crops of the SAME item (a single question, or a passage group with its questions, continuing across crops/pages — possibly repeated in another language). Treat all crops together as one continuous source.\n\n' + text.trim();
-        }
-        // Empty multi-image answer → try per-crop below.
-    } catch (err) {
-        // Quota/key problems won't get better crop-by-crop — surface them.
-        if (qxIsLimitError(err)) throw err;
-        // Anything else (model rejects multiple images, timeout, transient
-        // error) → fall back to sequential per-crop reads with progress.
-    }
-
-    const label = document.getElementById('qx-extract-label');
     const parts = [];
     for (let i = 0; i < list.length; i++) {
-        if (label) label.textContent = `Reading crop ${i + 1} of ${list.length} (${visionModel})…`;
-        const t = await callVision(QX_TRANSCRIBE_PROMPT, { imageB64: list[i] });
+        const t = await transcribeOne(list[i]);
         parts.push(`--- Crop ${i + 1} of ${list.length} ---\n${(t || '').trim()}`);
     }
     // The pieces belong together — flag that for the structuring step.
