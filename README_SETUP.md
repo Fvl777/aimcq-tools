@@ -192,6 +192,38 @@ and ignore the toggle.)
 
 ---
 
+## Multi-file language tabs (same question in separate EN / HI PDFs)
+
+The **Question Extractor**'s PDF canvas now supports **multiple documents as
+tabs**, so a question bank whose English and Hindi versions live in *separate
+files* can be extracted into one bilingual question:
+
+1. Load the first file as usual. A **tab bar** appears above the canvas showing
+   it, plus an **＋ Add PDF/Image** button.
+2. Click **＋ Add PDF/Image** to load the second file (e.g. the Hindi PDF) as a
+   new tab. Add as many as you like — each tab keeps its own page position,
+   zoom and Span-pages state. Switch tabs by clicking them; **Change File**
+   replaces just the current tab, and each tab's **✕** closes it.
+3. Each tab has a small **language selector** (Auto / EN / HI). Set the English
+   file's tab to **EN** and the Hindi file's tab to **HI** (optional but
+   recommended — it tells the AI which crop is which language).
+4. Crop the question in the first tab and click **Add crop**; switch to the
+   other tab, crop the same question there. The crop queue is **shared across
+   tabs**, so both crops stay banked together.
+5. Set **Output → Bilingual (EN + HI)** and click **Extract**. Every banked
+   crop plus the current selection is sent as ONE question, and the AI maps
+   each crop to its own language side — it uses the English crop for the English
+   fields and the Hindi crop for the Hindi fields **instead of translating**.
+   The per-crop language tags flow through both the direct-Gemini path and the
+   Gemma/Gemini → DeepSeek transcription path.
+
+Everything else about extraction is unchanged: single-file, image, passage and
+continuation (multi-page) crops all still work exactly as before — the tabs are
+purely additive. Closing every tab returns to the file picker but keeps any
+crops you already banked.
+
+---
+
 ## Cleaner extraction — no leaked options, no answer-mark artifacts
 
 Two extraction refinements:
