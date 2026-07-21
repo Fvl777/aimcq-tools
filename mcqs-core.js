@@ -6958,14 +6958,34 @@ async function aiGeminiRequest(prompt, opts) {
             : { temperature: 0.2, responseMimeType: 'application/json' }
     };
 
-    const resp = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': key,
-        },
-        body: JSON.stringify(body)
-    });
+    // Hard timeout: without it a stalled connection hangs forever and the UI
+    // shows "Reading image…" with no result. Default 120s; callers can pass
+    // opts.timeoutMs (e.g. transcription uses a tighter limit).
+    const timeoutMs = Math.max(10000, opts.timeoutMs || 120000);
+    const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+
+    let resp;
+    try {
+        resp = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': key,
+            },
+            body: JSON.stringify(body),
+            ...(ctrl ? { signal: ctrl.signal } : {}),
+        });
+    } catch (e) {
+        if (timer) clearTimeout(timer);
+        if (e && (e.name === 'AbortError' || /abort/i.test(e.message || ''))) {
+            const err = new Error(`The AI request timed out after ${Math.round(timeoutMs / 1000)}s — the API did not respond. Try again (or switch model/key in the settings).`);
+            err.timeout = true;
+            throw err;
+        }
+        throw e;
+    }
+    if (timer) clearTimeout(timer);
 
     if (!resp.ok) {
         let detail = '', reason = '', gstatus = '';
@@ -9610,19 +9630,35 @@ function qxIsLimitError(err) {
 // ---------- DeepSeek transport (OpenAI-compatible) ----------
 async function aiDeepseekRequest(prompt, opts) {
     opts = opts || {};
-    const resp = await fetch('https://api.deepseek.com/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + (opts.key || ''),
-        },
-        body: JSON.stringify({
-            model: opts.model || 'deepseek-v4-flash',
-            messages: [{ role: 'user', content: prompt }],
-            temperature: opts.plainText ? 0 : 0.2,
-            ...(opts.plainText ? {} : { response_format: { type: 'json_object' } }),
-        }),
-    });
+    const timeoutMs = Math.max(10000, opts.timeoutMs || 120000);
+    const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+    let resp;
+    try {
+        resp = await fetch('https://api.deepseek.com/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + (opts.key || ''),
+            },
+            body: JSON.stringify({
+                model: opts.model || 'deepseek-v4-flash',
+                messages: [{ role: 'user', content: prompt }],
+                temperature: opts.plainText ? 0 : 0.2,
+                ...(opts.plainText ? {} : { response_format: { type: 'json_object' } }),
+            }),
+            ...(ctrl ? { signal: ctrl.signal } : {}),
+        });
+    } catch (e) {
+        if (timer) clearTimeout(timer);
+        if (e && (e.name === 'AbortError' || /abort/i.test(e.message || ''))) {
+            const err = new Error(`The AI request timed out after ${Math.round(timeoutMs / 1000)}s — the API did not respond. Try again.`);
+            err.timeout = true;
+            throw err;
+        }
+        throw e;
+    }
+    if (timer) clearTimeout(timer);
     if (!resp.ok) {
         let detail = '';
         try { const j = await resp.json(); detail = (j.error && j.error.message) || ''; } catch (e) {}
@@ -9687,37 +9723,56 @@ const QX_TRANSCRIBE_PROMPT =
 
 async function qxGeminiTranscribe(images) {
     const visionModel = qxPools.visionModel || QX_VISION_MODEL_DEFAULT;
-    // `images` may be a single base64 string or an array of them. When more
-    // than one crop is supplied (a question that continues onto another page,
-    // or the same question in a second language), each crop is transcribed on
-    // its own and the pieces are joined so the structuring step sees the whole
-    // question as one continuous input.
+    // `images` may be a single base64 string or an array of them. Multiple
+    // crops (a question continuing on another page, or the same question in a
+    // second language / second PDF) are read in ONE vision call with all the
+    // images attached — a single round-trip instead of N sequential calls,
+    // which is both much faster and far less likely to trip free-tier
+    // per-minute rate limits. If the vision model rejects the multi-image
+    // request, we fall back to reading the crops one by one (with progress).
     const list = Array.isArray(images) ? images.filter(Boolean) : [images].filter(Boolean);
     if (!list.length) throw new Error('No crop to transcribe.');
+    const TRANSCRIBE_TIMEOUT = 90000;   // transcription is fast — fail a stalled call quickly
 
-    const transcribeOne = async (b64) => {
-        // Prefer the extractor's Gemini pool (with failover); fall back to the
-        // Question Editor's Gemini key if the pool is empty. Always uses the
-        // dedicated vision model (default: gemma-4-31b-it) — independent of
-        // whichever Gemini model is selected for direct Gemini-mode extraction,
-        // so it draws on its own free-tier quota.
+    const callVision = async (prompt, imgOpts) => {
+        const opts = Object.assign({ plainText: true, imageMime: 'image/webp', timeoutMs: TRANSCRIBE_TIMEOUT, modelOverride: visionModel }, imgOpts);
         if (qxPoolConfiguredKeys('gemini').length) {
-            const call = await qxAiCall(QX_TRANSCRIBE_PROMPT,
-                { imageB64: b64, imageMime: 'image/webp', plainText: true, modelOverride: visionModel }, 'gemini');
+            const call = await qxAiCall(prompt, opts, 'gemini');
             return call.text;
         }
         if (typeof aiConfigured === 'function' && aiConfigured()) {
-            return aiGeminiRequest(QX_TRANSCRIBE_PROMPT,
-                { imageB64: b64, imageMime: 'image/webp', plainText: true, model: visionModel });
+            delete opts.modelOverride;
+            opts.model = visionModel;
+            return aiGeminiRequest(prompt, opts);
         }
         throw new Error('DeepSeek mode needs a Gemini-API key for reading the image (DeepSeek has no image input). Add a Gemini key to the extractor pool, or configure the Question Editor\'s AI settings.');
     };
 
-    if (list.length === 1) return transcribeOne(list[0]);
+    if (list.length === 1) return callVision(QX_TRANSCRIBE_PROMPT, { imageB64: list[0] });
 
+    // ---- multi-crop: ONE call, all images attached ----
+    const multiPrompt =
+        `You are given ${list.length} images. They are crops of the SAME item (a single question, or a passage group with its questions, continuing across pages/files — possibly the same content in another language). ` +
+        `Transcribe EACH image separately, in the given order, and start each transcription with a header line exactly like "--- Crop 1 of ${list.length} ---", "--- Crop 2 of ${list.length} ---", and so on. ` +
+        'Within each crop, apply these transcription rules:\n' + QX_TRANSCRIBE_PROMPT;
+    try {
+        const text = await callVision(multiPrompt, { imagesB64: list });
+        if (text && text.trim()) {
+            return 'The following transcription comes from MULTIPLE crops of the SAME item (a single question, or a passage group with its questions, continuing across crops/pages — possibly repeated in another language). Treat all crops together as one continuous source.\n\n' + text.trim();
+        }
+        // Empty multi-image answer → try per-crop below.
+    } catch (err) {
+        // Quota/key problems won't get better crop-by-crop — surface them.
+        if (qxIsLimitError(err)) throw err;
+        // Anything else (model rejects multiple images, timeout, transient
+        // error) → fall back to sequential per-crop reads with progress.
+    }
+
+    const label = document.getElementById('qx-extract-label');
     const parts = [];
     for (let i = 0; i < list.length; i++) {
-        const t = await transcribeOne(list[i]);
+        if (label) label.textContent = `Reading crop ${i + 1} of ${list.length} (${visionModel})…`;
+        const t = await callVision(QX_TRANSCRIBE_PROMPT, { imageB64: list[i] });
         parts.push(`--- Crop ${i + 1} of ${list.length} ---\n${(t || '').trim()}`);
     }
     // The pieces belong together — flag that for the structuring step.
