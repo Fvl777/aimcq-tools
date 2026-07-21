@@ -7637,6 +7637,8 @@ const qxState = {
     scale: 1, fitDispW: 0, fitDispH: 0,
     rendering: false, pendingPage: null,
     cropper: null,
+    docs: [],              // open documents (tabs): [{id, name, kind:'pdf'|'image', pdfDoc?, img?, pageNum, scale, numPages}]
+    activeDocIdx: -1,      // index into docs of the tab currently shown
     result: null,          // current AI extraction under review
     cropThumb: '',         // small dataURL of the crop (stored with record)
     crops: [],             // queued crops for a multi-part question: [{b64, thumb}]
@@ -7908,39 +7910,6 @@ function qxRenderPdfContinuous(startNum) {
     if (cp) cp.textContent = last > startNum ? (startNum + '\u2013' + last) : String(startNum);
 }
 
-function qxRenderImage(file) {
-    const canvas = document.getElementById('qx-canvas');
-    if (!canvas) return;
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = function () {
-        const natW = img.naturalWidth || 1, natH = img.naturalHeight || 1;
-        canvas.width = natW; canvas.height = natH;
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, natW, natH);
-        ctx.drawImage(img, 0, 0, natW, natH);
-        URL.revokeObjectURL(url);
-        const scroll = document.getElementById('qx-pdf-scroll');
-        const containerWidth = Math.max(scroll.clientWidth - 4, 200);
-        qxState.fitDispW = Math.min(natW, containerWidth);
-        qxState.fitDispH = qxState.fitDispW * (natH / natW);
-        qxState.srcType = 'image';
-        qxState.pdfDoc = null;
-        qxState.pageNum = 1;
-        if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
-        qxApplyZoom();
-        qxEnableCropper();
-        document.getElementById('qx-cur-page').textContent = '1';
-        document.getElementById('qx-total-pages').textContent = '1';
-        qxUpdateNav();
-    };
-    img.onerror = function () {
-        URL.revokeObjectURL(url);
-        showToast('Image error', 'Could not load that image file.', 'error');
-    };
-    img.src = url;
-}
-
 function qxUpdateNav() {
     const isImg = qxState.srcType === 'image';
     const prev = document.getElementById('qx-prev-page');
@@ -7954,6 +7923,138 @@ function qxShowWorkspace() {
     document.getElementById('qx-source-pick').classList.add('hidden');
 }
 
+// ---------- multi-document tabs ----------
+// Several PDFs/images can be open at once as tabs above the canvas — e.g. a
+// question bank whose ENGLISH paper is one PDF and whose HINDI paper is a
+// second PDF. Combined with the multi-crop queue this lets one question be
+// assembled from different files: crop the English version in tab 1, "Add
+// crop", switch to tab 2, crop the Hindi version, then Extract (bilingual).
+// Each tab remembers its own page number and zoom. The legacy single-doc
+// fields on qxState (pdfDoc/srcType/pageNum/scale) always mirror the ACTIVE
+// tab, so all existing rendering/nav/crop code keeps working unchanged.
+let qxDocSeq = 1;
+
+function qxActiveDoc() {
+    return qxState.docs[qxState.activeDocIdx] || null;
+}
+
+// Persist the current view state (page, zoom) back into the active tab.
+function qxSyncActiveDocState() {
+    const d = qxActiveDoc();
+    if (!d) return;
+    d.pageNum = qxState.pageNum;
+    d.scale = qxState.scale;
+}
+
+// Load a tab's state into the legacy fields and render it.
+function qxActivateDoc(idx, opts) {
+    opts = opts || {};
+    if (idx < 0 || idx >= qxState.docs.length) return;
+    if (!opts.skipSync) qxSyncActiveDocState();
+    qxState.activeDocIdx = idx;
+    const d = qxState.docs[idx];
+    qxState.pdfDoc = d.kind === 'pdf' ? d.pdfDoc : null;
+    qxState.srcType = d.kind;
+    qxState.pageNum = d.pageNum || 1;
+    qxState.scale = d.scale || 1;
+    if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
+    document.getElementById('qx-total-pages').textContent = d.kind === 'pdf' ? d.numPages : '1';
+    qxRenderDocTabs();
+    qxUpdateNav();
+    if (d.kind === 'pdf') {
+        qxRenderPdfPage(qxState.pageNum);
+    } else {
+        qxRenderImageDoc(d);
+    }
+}
+
+// Register a freshly loaded document as a new tab and switch to it.
+function qxAddDoc(doc) {
+    qxSyncActiveDocState();
+    qxState.docs.push(doc);
+    qxShowWorkspace();
+    qxActivateDoc(qxState.docs.length - 1, { skipSync: true });
+}
+
+// Close a tab. Its queued crops (if any) are kept — they are page snapshots,
+// independent of the source document.
+function qxCloseDoc(idx) {
+    if (idx < 0 || idx >= qxState.docs.length) return;
+    qxSyncActiveDocState();
+    const closing = qxState.docs[idx];
+    try { if (closing.kind === 'pdf' && closing.pdfDoc && closing.pdfDoc.destroy) closing.pdfDoc.destroy(); } catch (e) {}
+    qxState.docs.splice(idx, 1);
+
+    if (!qxState.docs.length) {
+        // Last tab closed → back to the source picker.
+        if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
+        qxState.pdfDoc = null; qxState.srcType = ''; qxState.activeDocIdx = -1;
+        qxRenderDocTabs();
+        document.getElementById('qx-workspace').classList.add('hidden');
+        document.getElementById('qx-source-pick').classList.remove('hidden');
+        return;
+    }
+    let next = qxState.activeDocIdx;
+    if (idx < next) next--;                       // active shifted left
+    else if (idx === next) next = Math.min(idx, qxState.docs.length - 1);   // closed the active tab
+    qxState.activeDocIdx = -1;                    // force full re-activate (no sync of a dead tab)
+    qxActivateDoc(next, { skipSync: true });
+}
+
+function qxRenderDocTabs() {
+    const bar = document.getElementById('qx-doc-tabs');
+    if (!bar) return;
+    if (!qxState.docs.length) { bar.classList.add('hidden'); bar.innerHTML = ''; return; }
+    bar.classList.remove('hidden');
+    const icon = k => k === 'pdf' ? 'file-text' : 'image';
+    let html = qxState.docs.map((d, i) => `
+        <button type="button" class="qx-doc-tab ${i === qxState.activeDocIdx ? 'active' : ''}" data-idx="${i}" title="${qxEsc(d.name)}${d.kind === 'pdf' ? ` — ${d.numPages} pages` : ''}">
+            <i data-lucide="${icon(d.kind)}" class="w-3.5 h-3.5"></i>
+            <span class="qx-doc-tab-name">${qxEsc(d.name)}</span>
+            <span class="qx-doc-tab-close" data-close="${i}" title="Close this file">&times;</span>
+        </button>`).join('');
+    html += `
+        <button type="button" class="qx-doc-tab add" id="qx-doc-tab-add" title="Open another PDF or image in a new tab — e.g. the same question bank in another language. Crops can be combined across tabs with 'Add crop'.">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add file
+        </button>`;
+    bar.innerHTML = html;
+
+    bar.querySelectorAll('.qx-doc-tab[data-idx]').forEach(t => t.addEventListener('click', (ev) => {
+        const closeIdx = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-close');
+        if (closeIdx != null) { ev.stopPropagation(); qxCloseDoc(parseInt(closeIdx, 10)); return; }
+        const i = parseInt(t.getAttribute('data-idx'), 10);
+        if (i !== qxState.activeDocIdx) qxActivateDoc(i);
+    }));
+    const addBtn = document.getElementById('qx-doc-tab-add');
+    if (addBtn) addBtn.addEventListener('click', () => {
+        const inp = document.getElementById('qx-add-file');
+        if (inp) inp.click();
+    });
+    try { lucide.createIcons(); } catch (e) {}
+}
+
+// Draw an image tab's (already loaded) Image element onto the canvas.
+function qxRenderImageDoc(d) {
+    const canvas = document.getElementById('qx-canvas');
+    if (!canvas || !d || !d.img) return;
+    const img = d.img;
+    const natW = img.naturalWidth || 1, natH = img.naturalHeight || 1;
+    canvas.width = natW; canvas.height = natH;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, natW, natH);
+    ctx.drawImage(img, 0, 0, natW, natH);
+    const scroll = document.getElementById('qx-pdf-scroll');
+    const containerWidth = Math.max(scroll.clientWidth - 4, 200);
+    qxState.fitDispW = Math.min(natW, containerWidth);
+    qxState.fitDispH = qxState.fitDispW * (natH / natW);
+    if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
+    qxApplyZoom();
+    qxEnableCropper();
+    document.getElementById('qx-cur-page').textContent = '1';
+    document.getElementById('qx-total-pages').textContent = '1';
+    qxUpdateNav();
+}
+
 function qxLoadPdfFile(file) {
     if (typeof pdfjsLib === 'undefined') {
         showToast('PDF engine missing', 'pdf.js failed to load — refresh and try again.', 'error');
@@ -7964,16 +8065,43 @@ function qxLoadPdfFile(file) {
         const docParams = { data: new Uint8Array(e.target.result) };
         if (window.pdfjsWorkerDisabled) docParams.disableWorker = true;
         pdfjsLib.getDocument(docParams).promise.then(doc => {
-            qxState.pdfDoc = doc;
-            qxState.pageNum = 1;
-            qxState.scale = 1;
-            document.getElementById('qx-total-pages').textContent = doc.numPages;
-            qxShowWorkspace();
-            qxUpdateNav();
-            qxRenderPdfPage(1);
+            qxAddDoc({
+                id: qxDocSeq++,
+                name: file.name || 'document.pdf',
+                kind: 'pdf',
+                pdfDoc: doc,
+                numPages: doc.numPages,
+                pageNum: 1,
+                scale: 1,
+            });
         }).catch(err => showToast('PDF error', err.message || String(err), 'error'));
     };
     reader.readAsArrayBuffer(file);
+}
+
+// Load an image file as a new tab. The decoded Image element is kept on the
+// tab entry (loaded from a dataURL, so it stays valid for re-rendering when
+// the user switches back to this tab).
+function qxLoadImageFile(file) {
+    const reader = new FileReader();
+    reader.onload = e => {
+        const img = new Image();
+        img.onload = function () {
+            qxAddDoc({
+                id: qxDocSeq++,
+                name: file.name || 'image',
+                kind: 'image',
+                img,
+                numPages: 1,
+                pageNum: 1,
+                scale: 1,
+            });
+        };
+        img.onerror = function () { showToast('Image error', 'Could not load that image file.', 'error'); };
+        img.src = e.target.result;
+    };
+    reader.onerror = () => showToast('Image error', 'Could not read that image file.', 'error');
+    reader.readAsDataURL(file);
 }
 
 function qxGetCropCanvas(opts) {
@@ -8011,7 +8139,7 @@ function qxAddCrop() {
     const thumb = qxScaleCanvas(crop, 300).toDataURL('image/jpeg', 0.7);
     qxState.crops.push({ b64, thumb });
     qxRenderCropQueue();
-    showToast('Crop added', `${qxState.crops.length} crop${qxState.crops.length > 1 ? 's' : ''} queued. Turn the page / select more, then Extract to combine them into one question.`, 'success');
+    showToast('Crop added', `${qxState.crops.length} crop${qxState.crops.length > 1 ? 's' : ''} queued. Turn the page or switch file tab (e.g. the other-language PDF), select more, then Extract to combine them into one question.`, 'success');
 }
 
 function qxRemoveCrop(idx) {
@@ -8047,7 +8175,7 @@ function qxRenderCropQueue() {
             <button type="button" id="qx-crop-clear" class="qx-crop-queue-clear">Clear all</button>
         </div>
         <div class="qx-crop-queue-strip">${items}</div>
-        <p class="qx-crop-queue-hint">These will be combined into a single question when you click Extract (the current on-screen selection, if any, is added last).</p>`;
+        <p class="qx-crop-queue-hint">These will be combined into a single question when you click Extract (the current on-screen selection, if any, is added last). You can add crops from any page and any open file tab — e.g. English from one PDF, Hindi from another.</p>`;
     wrap.querySelectorAll('.qx-crop-queue-del').forEach(b =>
         b.addEventListener('click', () => qxRemoveCrop(parseInt(b.getAttribute('data-idx'), 10))));
     const clr = document.getElementById('qx-crop-clear');
@@ -9053,8 +9181,7 @@ async function qxExportBank() {
         imgIn.addEventListener('change', e => {
             const f = e.target.files[0];
             if (!f) return;
-            qxShowWorkspace();
-            qxRenderImage(f);
+            qxLoadImageFile(f);
             imgIn.value = '';
         });
 
@@ -9078,10 +9205,26 @@ async function qxExportBank() {
         document.getElementById('qx-zoom-reset').addEventListener('click', () => { qxState.scale = 1; qxApplyZoom(); });
         document.getElementById('qx-change-file').addEventListener('click', () => {
             if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
+            qxState.docs.forEach(d => { try { if (d.kind === 'pdf' && d.pdfDoc && d.pdfDoc.destroy) d.pdfDoc.destroy(); } catch (e) {} });
+            qxState.docs = []; qxState.activeDocIdx = -1;
+            qxRenderDocTabs();
             qxState.pdfDoc = null; qxState.srcType = '';
             if (qxState.crops.length) { qxState.crops = []; qxRenderCropQueue(); }
             document.getElementById('qx-workspace').classList.add('hidden');
             document.getElementById('qx-source-pick').classList.remove('hidden');
+        });
+
+        // "+ Add file" tab → one hidden input accepting both PDFs and images,
+        // routed by type. Opens the file as an ADDITIONAL tab (e.g. the Hindi
+        // paper of a bank whose English paper is already open in tab 1).
+        const addFileIn = document.getElementById('qx-add-file');
+        if (addFileIn) addFileIn.addEventListener('change', e => {
+            const f = e.target.files[0];
+            if (!f) return;
+            if (f.type === 'application/pdf') qxLoadPdfFile(f);
+            else if (/^image\//.test(f.type || '')) qxLoadImageFile(f);
+            else showToast('Unsupported file', 'Choose a .pdf or an image file.', 'error');
+            addFileIn.value = '';
         });
 
         document.getElementById('qx-extract-btn').addEventListener('click', qxExtract);
