@@ -901,6 +901,10 @@
                             <option value="bilingual">Bilingual (EN + HI)</option>
                         </select>
                     </div>
+                    <label class="flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-xl px-3 flex-shrink-0 cursor-pointer" title="Reading-comprehension mode: crop the passage AND all its questions (use Add crop to span pages/columns). One AI call extracts the passage plus every question, and Save stores them as a linked passage group in the standard JSON format.">
+                        <input type="checkbox" id="qx-passage" class="accent-rose-600">
+                        <i data-lucide="book-open-text" class="w-3.5 h-3.5 text-rose-500"></i> Passage mode
+                    </label>
                     <label class="flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-xl px-3 flex-shrink-0 cursor-pointer" title="For numerical/mathematical questions, break the solution into clearly numbered steps instead of a dense paragraph">
                         <input type="checkbox" id="qx-steps" checked class="accent-rose-600">
                         <i data-lucide="list-ordered" class="w-3.5 h-3.5 text-rose-500"></i> Step-by-step math
