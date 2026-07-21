@@ -865,6 +865,8 @@
                     <h3 class="font-semibold text-gray-800">Crop a question <span class="text-gray-400 font-normal text-sm">(drag around ONE full question, like Google Lens)</span></h3>
                 </div>
                 <div class="fig-pdf-stage">
+                    <input type="file" id="qx-add-file" accept="application/pdf,image/*" class="hidden">
+                    <div id="qx-doc-tabs" class="qx-doc-tabs hidden"><!-- open file tabs (rendered by JS) --></div>
                     <div class="fig-page-nav">
                         <button type="button" class="fig-nav-btn" id="qx-prev-page">&laquo; Prev</button>
                         <span>Page <b id="qx-cur-page">1</b> / <b id="qx-total-pages">--</b></span>
@@ -879,7 +881,7 @@
                         <button type="button" class="fig-nav-btn" id="qx-zoom-in" title="Zoom in">+</button>
                         <button type="button" class="fig-nav-btn" id="qx-zoom-reset" title="Reset zoom to fit">Fit</button>
                         <span class="fig-nav-sep"></span>
-                        <button type="button" class="fig-nav-btn" id="qx-change-file" title="Load a different PDF or image">Change File</button>
+                        <button type="button" class="fig-nav-btn" id="qx-change-file" title="Close ALL open file tabs and start over with a different PDF or image (also clears any queued crops)">Change File</button>
                     </div>
                     <div id="qx-pdf-scroll" class="fig-pdf-scroll">
                         <div class="fig-pdf-wrap">
