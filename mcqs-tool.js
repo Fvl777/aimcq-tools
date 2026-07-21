@@ -865,6 +865,9 @@
                     <h3 class="font-semibold text-gray-800">Crop a question <span class="text-gray-400 font-normal text-sm">(drag around ONE full question, like Google Lens)</span></h3>
                 </div>
                 <div class="fig-pdf-stage">
+                    <input type="file" id="qx-add-file" accept="application/pdf,image/*" class="hidden">
+                    <!-- Document tabs: load several PDFs/images at once (e.g. English paper + Hindi paper). Rendered by JS. -->
+                    <div id="qx-doc-tabs" class="qx-doc-tabs hidden"></div>
                     <div class="fig-page-nav">
                         <button type="button" class="fig-nav-btn" id="qx-prev-page">&laquo; Prev</button>
                         <span>Page <b id="qx-cur-page">1</b> / <b id="qx-total-pages">--</b></span>
@@ -879,7 +882,7 @@
                         <button type="button" class="fig-nav-btn" id="qx-zoom-in" title="Zoom in">+</button>
                         <button type="button" class="fig-nav-btn" id="qx-zoom-reset" title="Reset zoom to fit">Fit</button>
                         <span class="fig-nav-sep"></span>
-                        <button type="button" class="fig-nav-btn" id="qx-change-file" title="Load a different PDF or image">Change File</button>
+                        <button type="button" class="fig-nav-btn" id="qx-change-file" title="Replace the file in the current tab (other tabs and queued crops are kept)">Change File</button>
                     </div>
                     <div id="qx-pdf-scroll" class="fig-pdf-scroll">
                         <div class="fig-pdf-wrap">
@@ -888,7 +891,7 @@
                     </div>
                     <p class="fig-crop-hint">
                         <i data-lucide="info" class="w-3 h-3"></i>
-                        Crop mode is always <b>on</b> — drag a box around one complete question (statement + options), then click <b>Extract Question with AI</b>.
+                        Crop mode is always <b>on</b> — drag a box around one complete question (statement + options), then click <b>Extract Question with AI</b>. Load several files as <b>tabs</b> (e.g. an English PDF and a Hindi PDF): crop the question in one tab with <b>Add crop</b>, switch tab, crop the other language, set Output to <b>Bilingual</b>, then Extract to merge them into one question.
                     </p>
                 </div>
                 <div class="flex items-stretch gap-2 flex-wrap">
