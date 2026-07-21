@@ -7639,8 +7639,17 @@ const qxState = {
     cropper: null,
     result: null,          // current AI extraction under review
     cropThumb: '',         // small dataURL of the crop (stored with record)
-    crops: [],             // queued crops for a multi-part question: [{b64, thumb}]
+    crops: [],             // queued crops for a multi-part question: [{b64, thumb, lang, docName}]
     busy: false,
+    // ---- multi-document tabs ----
+    // Several PDFs/images can be loaded at once as tabs (e.g. the SAME question
+    // bank in English in one PDF and Hindi in another). Each entry keeps its own
+    // source + page position; the crop queue is shared, so you crop the English
+    // question from one tab, switch to the Hindi tab, crop its version, and
+    // Extract combines them into one bilingual question.
+    docs: [],              // [{id,name,srcType,pdfDoc|imgEl,pageNum,numPages,continuous,scale,lang}]
+    activeDoc: -1,         // index of the doc currently shown in the canvas
+    pickMode: 'add',       // 'add' → new tab, 'replace' → swap the active tab's file
 };
 
 // ---------- IndexedDB question bank ----------
@@ -7954,6 +7963,181 @@ function qxShowWorkspace() {
     document.getElementById('qx-source-pick').classList.add('hidden');
 }
 
+// ---------- multi-document tabs ----------
+function qxMakeDocId() { return 'qxdoc-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7); }
+function qxLangName(l) { return l === 'en' ? 'English' : (l === 'hi' ? 'Hindi' : ''); }
+
+// Draw a decoded image element onto the canvas (on first load AND tab switch).
+function qxDrawImageEl(imgEl) {
+    const canvas = document.getElementById('qx-canvas');
+    if (!canvas || !imgEl) return;
+    const natW = imgEl.naturalWidth || 1, natH = imgEl.naturalHeight || 1;
+    canvas.width = natW; canvas.height = natH;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, natW, natH);
+    ctx.drawImage(imgEl, 0, 0, natW, natH);
+    const scroll = document.getElementById('qx-pdf-scroll');
+    const containerWidth = Math.max(scroll.clientWidth - 4, 200);
+    qxState.fitDispW = Math.min(natW, containerWidth);
+    qxState.fitDispH = qxState.fitDispW * (natH / natW);
+    qxState.srcType = 'image';
+    qxState.pdfDoc = null;
+    qxState.pageNum = 1;
+    if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
+    qxApplyZoom();
+    qxEnableCropper();
+    document.getElementById('qx-cur-page').textContent = '1';
+    document.getElementById('qx-total-pages').textContent = '1';
+    qxUpdateNav();
+}
+
+// Save the live viewer state back into the active doc entry.
+function qxSyncLiveToDoc() {
+    const d = qxState.docs[qxState.activeDoc];
+    if (!d) return;
+    d.pageNum = qxState.pageNum;
+    d.continuous = qxState.continuous;
+    d.scale = qxState.scale;
+    if (d.srcType === 'pdf') d.pdfDoc = qxState.pdfDoc;
+}
+
+// Load a doc entry into the live viewer and render it.
+function qxLoadDocIntoView(idx) {
+    const d = qxState.docs[idx];
+    if (!d) return;
+    qxState.activeDoc = idx;
+    qxState.continuous = !!d.continuous;
+    qxState.scale = d.scale || 1;
+    const contToggle = document.getElementById('qx-continuous');
+    if (contToggle) contToggle.checked = qxState.continuous;
+    if (d.srcType === 'pdf') {
+        qxState.pdfDoc = d.pdfDoc;
+        qxState.srcType = 'pdf';
+        qxState.pageNum = Math.min(Math.max(1, d.pageNum || 1), d.pdfDoc.numPages);
+        document.getElementById('qx-total-pages').textContent = d.pdfDoc.numPages;
+        qxUpdateNav();
+        window.qxQueuePage(qxState.pageNum);
+    } else {
+        qxState.pdfDoc = null;
+        qxState.srcType = 'image';
+        qxState.pageNum = 1;
+        qxDrawImageEl(d.imgEl);
+    }
+    qxRenderDocTabs();
+}
+
+function qxActivateDoc(idx) {
+    if (idx === qxState.activeDoc || !qxState.docs[idx]) return;
+    qxSyncLiveToDoc();
+    qxLoadDocIntoView(idx);
+}
+
+// Add a new document tab (or replace the active tab's file) and show it.
+function qxAddOrReplaceDoc(docObj) {
+    // Reveal the workspace FIRST so the canvas measures a real container width
+    // when it renders (a hidden stage reports 0 and would render too narrow).
+    qxShowWorkspace();
+    if (qxState.pickMode === 'replace' && qxState.docs[qxState.activeDoc]) {
+        const old = qxState.docs[qxState.activeDoc];
+        if (old.srcType === 'image' && old.imgEl && old.imgEl._objUrl) {
+            try { URL.revokeObjectURL(old.imgEl._objUrl); } catch (e) {}
+        }
+        docObj.id = old.id;
+        docObj.lang = old.lang || docObj.lang || 'auto';   // keep the tab's language tag
+        qxState.docs[qxState.activeDoc] = docObj;
+        const at = qxState.activeDoc;
+        qxState.activeDoc = -1;                             // force a fresh render
+        qxLoadDocIntoView(at);
+    } else {
+        qxSyncLiveToDoc();
+        qxState.docs.push(docObj);
+        qxLoadDocIntoView(qxState.docs.length - 1);
+    }
+    qxState.pickMode = 'add';
+}
+
+function qxCloseDoc(idx) {
+    const d = qxState.docs[idx];
+    if (!d) return;
+    if (d.srcType === 'image' && d.imgEl && d.imgEl._objUrl) {
+        try { URL.revokeObjectURL(d.imgEl._objUrl); } catch (e) {}
+    }
+    const wasActive = (idx === qxState.activeDoc);
+    qxState.docs.splice(idx, 1);
+    if (!qxState.docs.length) {
+        // No documents left → back to the source picker (queued crops are kept
+        // so an already-banked question can still be extracted).
+        if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
+        qxState.pdfDoc = null; qxState.srcType = ''; qxState.activeDoc = -1;
+        qxState.pickMode = 'add';
+        document.getElementById('qx-workspace').classList.add('hidden');
+        document.getElementById('qx-source-pick').classList.remove('hidden');
+        qxRenderDocTabs();
+        return;
+    }
+    if (wasActive) {
+        const newActive = Math.min(idx, qxState.docs.length - 1);
+        qxState.activeDoc = -1;
+        qxLoadDocIntoView(newActive);
+    } else {
+        if (idx < qxState.activeDoc) qxState.activeDoc--;
+        qxRenderDocTabs();   // just refresh the bar; keep the current view/selection
+    }
+}
+
+// Render the document-tab bar above the canvas.
+function qxRenderDocTabs() {
+    const bar = document.getElementById('qx-doc-tabs');
+    if (!bar) return;
+    const docs = qxState.docs;
+    if (!docs.length) { bar.classList.add('hidden'); bar.innerHTML = ''; return; }
+    bar.classList.remove('hidden');
+    const esc = qxEsc;
+    let html = '';
+    docs.forEach((d, i) => {
+        const active = i === qxState.activeDoc;
+        const icon = d.srcType === 'pdf' ? 'file-text' : 'image';
+        const lang = d.lang || 'auto';
+        html += `
+        <div class="qx-doc-tab${active ? ' active' : ''}" data-idx="${i}" title="${esc(d.name)}">
+            <i data-lucide="${icon}" class="w-3.5 h-3.5"></i>
+            <span class="qx-doc-tab-name">${esc(d.name)}</span>
+            <select class="qx-doc-tab-lang" data-idx="${i}" title="Language of THIS file — used as a hint when combining crops from different-language files into one bilingual question">
+                <option value="auto"${lang === 'auto' ? ' selected' : ''}>Auto</option>
+                <option value="en"${lang === 'en' ? ' selected' : ''}>EN</option>
+                <option value="hi"${lang === 'hi' ? ' selected' : ''}>HI</option>
+            </select>
+            <button type="button" class="qx-doc-tab-close" data-close="${i}" title="Close this document">&times;</button>
+        </div>`;
+    });
+    html += `<button type="button" id="qx-doc-add" class="qx-doc-add" title="Add another PDF or image as a new tab — e.g. the Hindi version of the same paper"><i data-lucide="plus" class="w-3.5 h-3.5"></i> Add PDF/Image</button>`;
+    bar.innerHTML = html;
+
+    bar.querySelectorAll('.qx-doc-tab').forEach(el => {
+        el.addEventListener('click', ev => {
+            if (ev.target.closest('.qx-doc-tab-close') || ev.target.closest('.qx-doc-tab-lang')) return;
+            qxActivateDoc(parseInt(el.getAttribute('data-idx'), 10));
+        });
+    });
+    bar.querySelectorAll('.qx-doc-tab-close').forEach(b => {
+        b.addEventListener('click', ev => { ev.stopPropagation(); qxCloseDoc(parseInt(b.getAttribute('data-close'), 10)); });
+    });
+    bar.querySelectorAll('.qx-doc-tab-lang').forEach(sel => {
+        sel.addEventListener('click', ev => ev.stopPropagation());
+        sel.addEventListener('change', () => {
+            const d = qxState.docs[parseInt(sel.getAttribute('data-idx'), 10)];
+            if (d) d.lang = sel.value;
+        });
+    });
+    const addBtn = document.getElementById('qx-doc-add');
+    if (addBtn) addBtn.addEventListener('click', () => {
+        qxState.pickMode = 'add';
+        const f = document.getElementById('qx-add-file');
+        if (f) { f.value = ''; f.click(); }
+    });
+    if (window.lucide && lucide.createIcons) { try { lucide.createIcons(); } catch (e) {} }
+}
+
 function qxLoadPdfFile(file) {
     if (typeof pdfjsLib === 'undefined') {
         showToast('PDF engine missing', 'pdf.js failed to load — refresh and try again.', 'error');
@@ -7964,16 +8148,34 @@ function qxLoadPdfFile(file) {
         const docParams = { data: new Uint8Array(e.target.result) };
         if (window.pdfjsWorkerDisabled) docParams.disableWorker = true;
         pdfjsLib.getDocument(docParams).promise.then(doc => {
-            qxState.pdfDoc = doc;
-            qxState.pageNum = 1;
-            qxState.scale = 1;
-            document.getElementById('qx-total-pages').textContent = doc.numPages;
-            qxShowWorkspace();
-            qxUpdateNav();
-            qxRenderPdfPage(1);
+            qxAddOrReplaceDoc({
+                id: qxMakeDocId(), name: file.name || 'PDF', srcType: 'pdf',
+                pdfDoc: doc, pageNum: 1, numPages: doc.numPages,
+                continuous: false, scale: 1, lang: 'auto',
+            });
         }).catch(err => showToast('PDF error', err.message || String(err), 'error'));
     };
     reader.readAsArrayBuffer(file);
+}
+
+// Load an image file as a document tab (decoded element is cached so switching
+// tabs redraws instantly; its object URL is kept alive until the tab closes).
+function qxLoadImageFile(file) {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = function () {
+        img._objUrl = url;
+        qxAddOrReplaceDoc({
+            id: qxMakeDocId(), name: file.name || 'Image', srcType: 'image',
+            imgEl: img, pageNum: 1, numPages: 1,
+            continuous: false, scale: 1, lang: 'auto',
+        });
+    };
+    img.onerror = function () {
+        try { URL.revokeObjectURL(url); } catch (e) {}
+        showToast('Image error', 'Could not load that image file.', 'error');
+    };
+    img.src = url;
 }
 
 function qxGetCropCanvas(opts) {
@@ -8009,7 +8211,8 @@ function qxAddCrop() {
     if (!crop) return;
     const b64 = qxScaleCanvas(crop, 1600).toDataURL('image/webp', 0.92).split(',')[1];
     const thumb = qxScaleCanvas(crop, 300).toDataURL('image/jpeg', 0.7);
-    qxState.crops.push({ b64, thumb });
+    const d = qxState.docs[qxState.activeDoc] || {};
+    qxState.crops.push({ b64, thumb, lang: d.lang || 'auto', docName: d.name || '' });
     qxRenderCropQueue();
     showToast('Crop added', `${qxState.crops.length} crop${qxState.crops.length > 1 ? 's' : ''} queued. Turn the page / select more, then Extract to combine them into one question.`, 'success');
 }
@@ -8333,13 +8536,18 @@ async function qxExtract() {
     // first so page order is preserved.
     const images = [];
     const thumbs = [];
-    qxState.crops.forEach(c => { if (c && c.b64) { images.push(c.b64); thumbs.push(c.thumb || ''); } });
+    const metas = [];   // per-crop {lang, name} — lets the AI map each crop to its language side
+    qxState.crops.forEach(c => {
+        if (c && c.b64) { images.push(c.b64); thumbs.push(c.thumb || ''); metas.push({ lang: c.lang || 'auto', name: c.docName || '' }); }
+    });
 
     const crop = qxGetCropCanvas({ silent: qxState.crops.length > 0 });
     if (crop) {
         const apiCanvas = qxScaleCanvas(crop, 1600);
         images.push(apiCanvas.toDataURL('image/webp', 0.92).split(',')[1]);
         thumbs.push(qxScaleCanvas(crop, 300).toDataURL('image/jpeg', 0.7));
+        const ad = qxState.docs[qxState.activeDoc] || {};
+        metas.push({ lang: ad.lang || 'auto', name: ad.name || '' });
     }
 
     if (!images.length) {
@@ -8362,7 +8570,7 @@ async function qxExtract() {
     if (label) label.textContent = passageMode ? 'Extracting passage & questions with AI…' : 'Extracting with AI…';
 
     try {
-        const call = await qxRunExtraction(passageMode ? qxBuildPassagePrompt : qxBuildPrompt, langMode, images, wantSteps, detailLevel);
+        const call = await qxRunExtraction(passageMode ? qxBuildPassagePrompt : qxBuildPrompt, langMode, images, wantSteps, detailLevel, metas);
         const raw = call.text;
         const p = aiParseJson(raw);
 
@@ -9072,15 +9280,27 @@ async function qxExportBank() {
             const f = e.target.files[0];
             if (!f) return;
             if (f.type !== 'application/pdf') { showToast('Not a PDF', 'Choose a .pdf file.', 'error'); return; }
+            qxState.pickMode = 'add';
             qxLoadPdfFile(f);
             pdfIn.value = '';
         });
         imgIn.addEventListener('change', e => {
             const f = e.target.files[0];
             if (!f) return;
-            qxShowWorkspace();
-            qxRenderImage(f);
+            qxState.pickMode = 'add';
+            qxLoadImageFile(f);
             imgIn.value = '';
+        });
+        // Unified input used by the tab bar's "Add PDF/Image" button and by
+        // "Change File" (replace the active tab). Accepts either type.
+        const addIn = document.getElementById('qx-add-file');
+        if (addIn) addIn.addEventListener('change', e => {
+            const f = e.target.files[0];
+            if (!f) return;
+            if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name || '')) qxLoadPdfFile(f);
+            else if ((f.type || '').indexOf('image/') === 0 || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name || '')) qxLoadImageFile(f);
+            else showToast('Unsupported file', 'Choose a PDF or an image (PNG, JPG, WEBP).', 'error');
+            addIn.value = '';
         });
 
         document.getElementById('qx-prev-page').addEventListener('click', () => {
@@ -9102,11 +9322,10 @@ async function qxExportBank() {
         document.getElementById('qx-zoom-out').addEventListener('click', () => { qxState.scale = Math.max(qxState.scale - 0.25, 0.25); qxApplyZoom(); });
         document.getElementById('qx-zoom-reset').addEventListener('click', () => { qxState.scale = 1; qxApplyZoom(); });
         document.getElementById('qx-change-file').addEventListener('click', () => {
-            if (qxState.cropper) { qxState.cropper.destroy(); qxState.cropper = null; }
-            qxState.pdfDoc = null; qxState.srcType = '';
-            if (qxState.crops.length) { qxState.crops = []; qxRenderCropQueue(); }
-            document.getElementById('qx-workspace').classList.add('hidden');
-            document.getElementById('qx-source-pick').classList.remove('hidden');
+            // Replace the file in the ACTIVE tab (keeps other tabs + queued crops).
+            qxState.pickMode = 'replace';
+            const f = document.getElementById('qx-add-file');
+            if (f) { f.value = ''; f.click(); }
         });
 
         document.getElementById('qx-extract-btn').addEventListener('click', qxExtract);
@@ -9567,7 +9786,7 @@ const QX_TRANSCRIBE_PROMPT =
     'Keep the question stem and the answer options clearly separated (transcribe the stem, then the options in order); do not merge option text into the stem. ' +
     'Include a printed/typeset answer key if present (e.g. a typeset "Answer (1)" line), but NOT hand-drawn ticks/crosses/circles/scribbles. Output ONLY the raw transcription — no commentary.';
 
-async function qxGeminiTranscribe(images) {
+async function qxGeminiTranscribe(images, metas) {
     const visionModel = qxPools.visionModel || QX_VISION_MODEL_DEFAULT;
     // `images` may be a single base64 string or an array of them. When more
     // than one crop is supplied (a question that continues onto another page,
@@ -9598,15 +9817,28 @@ async function qxGeminiTranscribe(images) {
     if (list.length === 1) return transcribeOne(list[0]);
 
     const parts = [];
+    let anyLang = false;
     for (let i = 0; i < list.length; i++) {
         const t = await transcribeOne(list[i]);
-        parts.push(`--- Crop ${i + 1} of ${list.length} ---\n${(t || '').trim()}`);
+        const meta = metas && metas[i];
+        const ln = meta ? qxLangName(meta.lang) : '';
+        if (ln) anyLang = true;
+        let tag = '';
+        if (ln) tag = ` [source language: ${ln}${meta && meta.name ? `, file: ${meta.name}` : ''}]`;
+        else if (meta && meta.name) tag = ` [file: ${meta.name}]`;
+        parts.push(`--- Crop ${i + 1} of ${list.length}${tag} ---\n${(t || '').trim()}`);
     }
-    // The pieces belong together — flag that for the structuring step.
-    return 'The following transcription comes from MULTIPLE crops of the SAME item (a single question, or a passage group with its questions, continuing across crops/pages — possibly repeated in another language). Treat all crops together as one continuous source.\n\n' + parts.join('\n\n');
+    // The pieces belong together — flag that for the structuring step. When the
+    // crops are tagged with different source languages (English file + Hindi
+    // file of the same question), tell the structurer to map each to its own
+    // language side rather than translating.
+    const preface = anyLang
+        ? 'The following transcription comes from MULTIPLE crops of the SAME question, captured from DIFFERENT-LANGUAGE source files (each crop is labelled with its source language). They are the SAME question in different languages. For bilingual output, use the English-source crop(s) for the English fields and the Hindi-source crop(s) for the Hindi fields — do NOT translate a language side that already has its own crop. Treat all crops together as one question.\n\n'
+        : 'The following transcription comes from MULTIPLE crops of the SAME item (a single question, or a passage group with its questions, continuing across crops/pages — possibly repeated in another language). Treat all crops together as one continuous source.\n\n';
+    return preface + parts.join('\n\n');
 }
 
-async function qxRunExtraction(buildPrompt, langMode, images, wantSteps, detailLevel) {
+async function qxRunExtraction(buildPrompt, langMode, images, wantSteps, detailLevel, metas) {
     const label = document.getElementById('qx-extract-label');
     // `images` may be a single base64 string or an array (multi-crop question).
     const imgList = Array.isArray(images) ? images.filter(Boolean) : [images].filter(Boolean);
@@ -9618,7 +9850,7 @@ async function qxRunExtraction(buildPrompt, langMode, images, wantSteps, detailL
 
     if (qxPools.provider === 'deepseek') {
         if (label) label.textContent = readLabel(qxPools.visionModel || 'vision model');
-        const transcript = await qxGeminiTranscribe(imgList);
+        const transcript = await qxGeminiTranscribe(imgList, metas);
         if (!transcript || !transcript.trim()) throw new Error(emptyMsg);
         if (label) label.textContent = 'Structuring with DeepSeek…';
         return qxAiCall(buildPrompt(langMode, transcript.trim(), wantSteps, detailLevel), {}, 'deepseek');
@@ -9629,7 +9861,7 @@ async function qxRunExtraction(buildPrompt, langMode, images, wantSteps, detailL
     if (qxPools.gemini.split) {
         try {
             if (label) label.textContent = readLabel(qxPools.visionModel);
-            const transcript = await qxGeminiTranscribe(imgList);
+            const transcript = await qxGeminiTranscribe(imgList, metas);
             if (!transcript || !transcript.trim()) throw new Error(emptyMsg);
             if (label) label.textContent = `Generating (${qxPools.gemini.model})…`;
             return await qxAiCall(buildPrompt(langMode, transcript.trim(), wantSteps, detailLevel), {}, 'gemini');
@@ -9641,12 +9873,12 @@ async function qxRunExtraction(buildPrompt, langMode, images, wantSteps, detailL
                     `"${qxPools.visionModel}" was rejected by the API (${err.message || 'not found'}). Falling back to a single multimodal ${qxPools.gemini.model} call. Fix the vision model id in the Extractor API Settings.`,
                     'info');
                 if (label) label.textContent = 'Extracting with AI…';
-                return qxAiCall(qxWithMultiHint(buildPrompt, langMode, wantSteps, detailLevel, multi), qxImgOpts(imgList), 'gemini');
+                return qxAiCall(qxWithMultiHint(buildPrompt, langMode, wantSteps, detailLevel, multi, metas), qxImgOpts(imgList), 'gemini');
             }
             throw err;
         }
     }
-    return qxAiCall(qxWithMultiHint(buildPrompt, langMode, wantSteps, detailLevel, multi), qxImgOpts(imgList), 'gemini');
+    return qxAiCall(qxWithMultiHint(buildPrompt, langMode, wantSteps, detailLevel, multi, metas), qxImgOpts(imgList), 'gemini');
 }
 
 // Build the image opts for a direct multimodal Gemini call from 1..N crops.
@@ -9658,12 +9890,31 @@ function qxImgOpts(imgList) {
 
 // For direct (non-split) multimodal calls there is no transcript to carry the
 // "these crops belong together" hint, so prepend it to the prompt instead.
-function qxWithMultiHint(buildPrompt, langMode, wantSteps, detailLevel, multi) {
+function qxWithMultiHint(buildPrompt, langMode, wantSteps, detailLevel, multi, metas) {
     const base = buildPrompt(langMode, undefined, wantSteps, detailLevel);
     if (!multi) return base;
-    const hint = (buildPrompt === qxBuildPassagePrompt)
-        ? 'NOTE: You are given MULTIPLE images that are all crops of the SAME reading-comprehension group — together they contain the directions, the passage, and ALL its questions (continued across pages/columns). Combine ALL images into ONE passage group.\n\n'
-        : 'NOTE: You are given MULTIPLE images that are all crops of the SAME single question — it continues across the images (e.g. the question or its options continue on the next page, or the same question appears in another language). Combine ALL images into ONE question.\n\n';
+    // If the crops carry per-file language tags (English file + Hindi file of the
+    // same question bank), spell out which crop is which language so the AI puts
+    // each into the right language side instead of translating.
+    const langLines = (metas || []).map((m, i) => {
+        const ln = qxLangName(m && m.lang);
+        return ln ? `  - Image ${i + 1}: ${ln} version${m && m.name ? ` (from ${m.name})` : ''}` : null;
+    }).filter(Boolean);
+
+    let hint;
+    if (buildPrompt === qxBuildPassagePrompt) {
+        hint = 'NOTE: You are given MULTIPLE images that are all crops of the SAME reading-comprehension group — together they contain the directions, the passage, and ALL its questions (continued across pages/columns'
+            + (langLines.length ? ', possibly with each language version in a separate image' : '')
+            + '). Combine ALL images into ONE passage group.'
+            + (langLines.length ? '\nLanguage of each image:\n' + langLines.join('\n') + '\nFor bilingual output use each image for its own language side and do NOT translate a side that already has an image.' : '')
+            + '\n\n';
+    } else if (langLines.length) {
+        hint = 'NOTE: You are given MULTIPLE images that are all crops of the SAME single question, provided in DIFFERENT LANGUAGES (the same question printed in separate files). Language of each image:\n'
+            + langLines.join('\n')
+            + '\nThey are the SAME question. For bilingual output, use each image for its own language side and do NOT translate a side that already has an image of that language. Combine ALL images into ONE question.\n\n';
+    } else {
+        hint = 'NOTE: You are given MULTIPLE images that are all crops of the SAME single question — it continues across the images (e.g. the question or its options continue on the next page, or the same question appears in another language). Combine ALL images into ONE question.\n\n';
+    }
     return hint + base;
 }
 
