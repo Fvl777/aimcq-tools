@@ -8166,6 +8166,136 @@ function qxBuildPrompt(langMode, transcript, wantSteps, detailLevel) {
     return L.join('\n');
 }
 
+// ---------- passage-group prompt ----------
+// Passage mode: the crop(s) contain a reading-comprehension PASSAGE (with its
+// directions line, e.g. "निर्देश प्रश्न संख्या 12 से 16 के लिए - ...") plus ALL the
+// questions that belong to it. One AI call returns the passage and every
+// question in a single structured response.
+function qxBuildPassagePrompt(langMode, transcript, wantSteps, detailLevel) {
+    const L = [];
+    L.push('You are an expert exam-question transcriber and subject-matter solver.');
+    if (transcript) {
+        L.push('Below is a raw, exact transcription of a READING-COMPREHENSION GROUP cropped from an exam paper: a directions line, a PASSAGE, and ALL the multiple-choice questions based on that passage (produced by an OCR/vision step — minor artifacts possible). Reconstruct the passage and EVERY question faithfully and completely, then solve each question.');
+        L.push('');
+        L.push('-----BEGIN TRANSCRIPTION-----');
+        L.push(transcript);
+        L.push('-----END TRANSCRIPTION-----');
+    } else {
+        L.push('The attached image(s) are crops of a READING-COMPREHENSION GROUP from an exam paper: a directions line, a PASSAGE, and ALL the multiple-choice questions based on that passage. Transcribe the passage and EVERY question faithfully and completely, then solve each question.');
+    }
+    L.push('');
+    L.push('STRUCTURE RULES:');
+    L.push('- DIRECTIONS: the group usually starts with a directions/instruction line (e.g. "निर्देश प्रश्न संख्या 12 से 16 के लिए - निम्नलिखित गद्यांश को ध्यान से पढ़िए..." or "Directions (Q. 12-16): Read the following passage..."). Put that ENTIRE line — including the question-number range — in "directions" EXACTLY as printed, as PLAIN TEXT (no HTML tags).');
+    L.push('- PASSAGE: put the full passage body in "passage_content" EXACTLY as printed, as PLAIN TEXT (no HTML tags; keep it as one continuous paragraph unless the source has a genuine paragraph break, in which case separate paragraphs with a single newline). Do NOT include the directions line or any question inside the passage body.');
+    L.push('- QUESTIONS: extract EVERY question that belongs to this passage, in printed order, into the "questions" array. Do not skip any, do not merge two questions into one, and do not invent questions that are not printed. If the crop also accidentally includes an unrelated non-passage question, EXCLUDE it.');
+    L.push('');
+    L.push('TRANSCRIPTION RULES (apply to every question):');
+    L.push(`- ${transcript ? 'Reconstruct each question text EXACTLY as transcribed (fix only obvious OCR-level artifacts)' : 'Transcribe each question text EXACTLY as printed (fix only obvious OCR-level artifacts)'}. Use minimal clean HTML (<b>, <i>, <br>) — do NOT use <sub>/<sup> tags (see the NOTATION rule below).`);
+    L.push('- LINE BREAKS (critical — do NOT copy the image\'s visual word-wrap): only insert a <br> where there is a genuine logical break. If a sentence merely wraps to the next visual line because of column/page width, join the wrapped words back into ONE continuous line with a single space. When in doubt, join.');
+    L.push('- ' + AI_LATEX_NOTATION_RULE);
+    L.push('- Do NOT include the question number prefix (e.g. "12.", "Q7)") in any question text.');
+    L.push('- QUESTION FIELD vs OPTIONS (critical): "question_html" must contain ONLY the question stem — never any of the answer options\' text. The options belong ONLY in the options array.');
+    L.push('- IGNORE ANSWER-MARKING ARTIFACTS & HAND MARKS (critical): ticks/checks (\u2713), crosses (\u2717/\u00d7), circles, underlines, arrows, highlighter, and ANY handwriting or hand-drawn scribbles overlaid on the page are NOT part of the printed content — never transcribe, describe, or reproduce them anywhere (passage, questions, options, or explanations). You MAY use such a mark privately as a hint for which option is correct, but never output the mark itself.');
+    L.push('- Transcribe ALL options of each question in order, WITHOUT their labels ("(1)", "(a)", "A." etc.).');
+    L.push('');
+    L.push('ANSWER & EXPLANATION (for every question):');
+    L.push('- If the paper marks the correct answer, use it. Otherwise SOLVE the question rigorously yourself — base the answer on the PASSAGE where the question refers to it — to determine "correct_index" (0-based).');
+    L.push('- Write an explanation justifying each correct answer, grounded in the passage where applicable (quote or reference the relevant part of the passage). It must NOT mention option letters/labels (A/B/C/D), the word "option"/"विकल्प", or phrases like "Correct Answer: (X)" — state and justify the answer\'s substance directly. Simple clean HTML: <p><b>concise statement of the answer\'s substance</b></p><p>justification</p>.');
+    if (wantSteps) {
+        L.push('- STEP-BY-STEP MATH SOLUTIONS: if — and ONLY if — a question is numerical/quantitative, structure its explanation as numbered steps ("<p><b>Step 1:</b> ...</p>" etc., translating "Step" into the output language if not English), keeping all math in LaTeX ($...$). Conceptual questions get a normal explanation.');
+    }
+    {
+        const d = aiDetailInstruction(detailLevel, 'the output language');
+        if (d) L.push('- ' + d + (detailLevel === 'detailed' ? ' For bilingual output, BOTH "explanation_html" and "explanation_html_hi" must meet this depth, each in its own language.' : ''));
+    }
+    L.push('');
+    if (langMode === 'en') {
+        L.push('OUTPUT LANGUAGE: English only ("language":"en"). If the source is in another language, translate faithfully to English.');
+    } else if (langMode === 'hi') {
+        L.push('OUTPUT LANGUAGE: Hindi only ("language":"hi"). If the source is in another language, translate faithfully to Hindi.');
+    } else if (langMode === 'bilingual') {
+        L.push('OUTPUT: BILINGUAL. Fill the base fields in ENGLISH and the _hi fields in HINDI ("language":"bilingual") — for the passage AND every question. If the source contains both languages, transcribe each side; otherwise translate faithfully for the missing side.');
+    } else {
+        L.push('OUTPUT LANGUAGE: Auto-detect. Hindi source → everything in Hindi with "language":"hi"; English → "language":"en". If BOTH languages are printed, base fields English, _hi fields Hindi, "language":"bilingual".');
+    }
+    L.push('');
+    L.push('Respond with ONLY a single JSON object (no markdown fences):');
+    L.push('{');
+    L.push('  "language": "en" | "hi" | "bilingual",');
+    L.push('  "directions": "<the printed directions/instruction line, plain text>",');
+    L.push('  "passage_content": "<the full passage body, plain text>",');
+    L.push('  "directions_hi": "<Hindi directions — ONLY for bilingual>",');
+    L.push('  "passage_content_hi": "<Hindi passage body — ONLY for bilingual>",');
+    L.push('  "confidence": "high" | "medium" | "low",');
+    L.push('  "note": "<1-2 sentences: anything uncertain — unreadable text, a question cut off, answer solved (not printed), etc. Empty string if nothing.>",');
+    L.push('  "questions": [');
+    L.push('    {');
+    L.push('      "question_html": "<question text as HTML>",');
+    L.push('      "options": ["option 1", "option 2", ...],');
+    L.push('      "correct_index": <0-based integer>,');
+    L.push('      "explanation_html": "<explanation HTML>",');
+    L.push('      "question_html_hi": "<Hindi question HTML — ONLY for bilingual>",');
+    L.push('      "options_hi": ["..."],');
+    L.push('      "explanation_html_hi": "<Hindi explanation HTML — ONLY for bilingual>"');
+    L.push('    },');
+    L.push('    ... one object per question, in printed order ...');
+    L.push('  ]');
+    L.push('}');
+    return L.join('\n');
+}
+
+// Validate + normalize the AI's passage-group JSON into qxState.result shape.
+function qxParsePassageResult(p) {
+    const passageContent = String(p.passage_content || '').trim();
+    if (!passageContent) throw new Error('AI returned no passage text.');
+    if (!Array.isArray(p.questions) || !p.questions.length) throw new Error('AI returned no questions for the passage.');
+
+    const language = (p.language === 'hi' || p.language === 'bilingual') ? p.language : 'en';
+    const questions = p.questions.map((q, idx) => {
+        if (!q || typeof q.question_html !== 'string' || !q.question_html.trim())
+            throw new Error(`Question ${idx + 1} came back without text.`);
+        if (!Array.isArray(q.options) || q.options.length < 2)
+            throw new Error(`Question ${idx + 1} came back with fewer than 2 options.`);
+        let ci = parseInt(q.correct_index);
+        if (isNaN(ci) || ci < 0 || ci >= q.options.length) ci = 0;
+        const isBi = language === 'bilingual' && Array.isArray(q.options_hi) && q.options_hi.length;
+        const enOpts = q.options.map(o => String(o == null ? '' : o));
+        const hiOpts = isBi ? q.options_hi.map(o => String(o == null ? '' : o)) : [];
+        return {
+            question: qxStripArtifacts(String(q.question_html), enOpts),
+            options: enOpts,
+            correct: ci,
+            explanation: String(q.explanation_html || ''),
+            hi: isBi ? {
+                question: qxStripArtifacts(String(q.question_html_hi || ''), hiOpts),
+                options: hiOpts,
+                explanation: String(q.explanation_html_hi || ''),
+            } : null,
+        };
+    });
+
+    return {
+        type: 'passage',
+        language,
+        passage: {
+            directions: String(p.directions || '').trim(),
+            content: passageContent,
+            directionsHi: language === 'bilingual' ? String(p.directions_hi || '').trim() : '',
+            contentHi: language === 'bilingual' ? String(p.passage_content_hi || '').trim() : '',
+        },
+        questions,
+        confidence: /^(high|medium|low)$/i.test(p.confidence || '') ? p.confidence.toLowerCase() : 'medium',
+        note: String(p.note || '').trim(),
+    };
+}
+
+// Idle label for the Extract button, passage-mode aware.
+function qxExtractBtnLabel() {
+    return (document.getElementById('qx-passage') || {}).checked
+        ? 'Extract Passage + Questions with AI'
+        : 'Extract Question with AI';
+}
+
 async function qxExtract() {
     if (qxState.busy) return;
     if (!qxPoolActiveKeys().length && !qxPoolConfiguredKeys().length) {
@@ -8198,17 +8328,26 @@ async function qxExtract() {
     const langMode = (document.getElementById('qx-lang') || {}).value || 'auto';
     const wantSteps = !!(document.getElementById('qx-steps') || {}).checked;
     const detailLevel = (document.getElementById('qx-detail') || {}).value || 'detailed';
+    const passageMode = !!(document.getElementById('qx-passage') || {}).checked;
 
     qxState.busy = true;
     const btn = document.getElementById('qx-extract-btn');
     const label = document.getElementById('qx-extract-label');
     if (btn) btn.disabled = true;
-    if (label) label.textContent = 'Extracting with AI…';
+    if (label) label.textContent = passageMode ? 'Extracting passage & questions with AI…' : 'Extracting with AI…';
 
     try {
-        const call = await qxRunExtraction(qxBuildPrompt, langMode, images, wantSteps, detailLevel);
+        const call = await qxRunExtraction(passageMode ? qxBuildPassagePrompt : qxBuildPrompt, langMode, images, wantSteps, detailLevel);
         const raw = call.text;
         const p = aiParseJson(raw);
+
+        if (passageMode) {
+            qxState.result = qxParsePassageResult(p);
+            qxRenderReview();
+            if (qxState.crops.length) { qxState.crops = []; qxRenderCropQueue(); }
+            showToast('Passage extracted', `Passage + ${qxState.result.questions.length} question${qxState.result.questions.length === 1 ? '' : 's'} — review below, then Save to Question Bank.`, 'success');
+            return;
+        }
 
         if (typeof p.question_html !== 'string' || !p.question_html.trim()) throw new Error('AI returned no question text.');
         if (!Array.isArray(p.options) || p.options.length < 2) throw new Error('AI returned fewer than 2 options.');
@@ -8241,7 +8380,7 @@ async function qxExtract() {
     } finally {
         qxState.busy = false;
         if (btn) btn.disabled = false;
-        if (label) label.textContent = 'Extract Question with AI';
+        if (label) label.textContent = qxExtractBtnLabel();
     }
 }
 
@@ -8278,9 +8417,33 @@ function qxFieldsHtml(prefix, data, heading) {
     <div class="rich-editor-wrap" data-field="qx-${prefix}-explanation"${lang}></div>`;
 }
 
+// Wire option add/remove buttons inside the review panel (delegated per render).
+function qxWireOptionRows(review) {
+    review.querySelectorAll('.qx-add-opt').forEach(b => b.addEventListener('click', () => {
+        const prefix = b.getAttribute('data-prefix');
+        const wrap = document.getElementById(`qx-${prefix}-opts`);
+        const i = wrap.querySelectorAll('.qx-opt-row').length;
+        const letter = OPTION_LETTERS[i] || String(i + 1);
+        const div = document.createElement('div');
+        div.className = 'qx-opt-row';
+        div.setAttribute('data-prefix', prefix);
+        div.innerHTML = `
+            <label class="qx-opt-radio"><input type="radio" name="qx-correct-${prefix}" value="${i}"><span>${letter}</span></label>
+            <input type="text" class="qx-opt-input" value="">
+            <button type="button" class="qx-opt-del"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>`;
+        wrap.appendChild(div);
+        div.querySelector('.qx-opt-del').addEventListener('click', () => { div.remove(); });
+        lucide.createIcons();
+    }));
+    review.querySelectorAll('.qx-opt-del').forEach(b => b.addEventListener('click', () => {
+        b.closest('.qx-opt-row').remove();
+    }));
+}
+
 function qxRenderReview() {
     const r = qxState.result;
     if (!r) return;
+    if (r.type === 'passage') { qxRenderPassageReview(); return; }
     const review = document.getElementById('qx-review');
     const fields = document.getElementById('qx-fields');
     const fieldsHi = document.getElementById('qx-fields-hi');
@@ -8317,29 +8480,83 @@ function qxRenderReview() {
         setReValue('qx-hi-explanation', r.hi.explanation || '');
     }
 
-    // Wire option add/remove (delegated per render).
-    review.querySelectorAll('.qx-add-opt').forEach(b => b.addEventListener('click', () => {
-        const prefix = b.getAttribute('data-prefix');
-        const wrap = document.getElementById(`qx-${prefix}-opts`);
-        const i = wrap.querySelectorAll('.qx-opt-row').length;
-        const letter = OPTION_LETTERS[i] || String(i + 1);
-        const div = document.createElement('div');
-        div.className = 'qx-opt-row';
-        div.setAttribute('data-prefix', prefix);
-        div.innerHTML = `
-            <label class="qx-opt-radio"><input type="radio" name="qx-correct-${prefix}" value="${i}"><span>${letter}</span></label>
-            <input type="text" class="qx-opt-input" value="">
-            <button type="button" class="qx-opt-del"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>`;
-        wrap.appendChild(div);
-        div.querySelector('.qx-opt-del').addEventListener('click', () => { div.remove(); });
-        lucide.createIcons();
-    }));
-    review.querySelectorAll('.qx-opt-del').forEach(b => b.addEventListener('click', () => {
-        b.closest('.qx-opt-row').remove();
-    }));
+    qxWireOptionRows(review);
 
     review.classList.remove('hidden');
     qxSetReviewMode('preview');   // students-eye view first; Editor is one click away
+    lucide.createIcons();
+    try { review.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
+}
+
+// ---------- passage review ----------
+// Renders the whole passage group in one review panel: the passage's
+// directions + body (plain-text editors — the aimcq passage format stores
+// plain text), then every question with the same rich-editor fields as a
+// normal single-question review, all under per-question prefixes en0/hi0/en1…
+function qxPassageTextareasHtml(r) {
+    const bi = r.language === 'bilingual';
+    const block = (suffix, dirVal, bodyVal, heading) => `
+        ${heading ? `<p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 mt-1">${heading}</p>` : ''}
+        <label class="qx-lbl">Directions line <span class="font-normal normal-case text-gray-400">(e.g. "निर्देश प्रश्न संख्या 12 से 16 के लिए - …" — stored as the passage title)</span></label>
+        <textarea id="qx-passage-dir-${suffix}" class="qx-ta" rows="2">${qxEsc(dirVal)}</textarea>
+        <label class="qx-lbl mt-3">Passage text</label>
+        <textarea id="qx-passage-body-${suffix}" class="qx-ta" rows="6">${qxEsc(bodyVal)}</textarea>`;
+    return `
+    <div class="qx-passage-box">
+        <p class="qx-passage-box-title"><i data-lucide="book-open-text" class="w-4 h-4 inline-block -mt-0.5 mr-1"></i>Passage</p>
+        ${block('en', r.passage.directions, r.passage.content, bi ? 'English' : '')}
+        ${bi ? block('hi', r.passage.directionsHi, r.passage.contentHi, 'हिन्दी (Hindi)') : ''}
+    </div>`;
+}
+
+function qxRenderPassageReview() {
+    const r = qxState.result;
+    if (!r || r.type !== 'passage') return;
+    const review = document.getElementById('qx-review');
+    const fields = document.getElementById('qx-fields');
+    const fieldsHi = document.getElementById('qx-fields-hi');
+    const thumb = document.getElementById('qx-crop-thumb');
+    const note = document.getElementById('qx-ai-note');
+    const conf = document.getElementById('qx-confidence');
+
+    if (thumb) thumb.src = qxState.cropThumb || '';
+    if (note) note.textContent = r.note ? `AI note: ${r.note}` : '';
+    if (conf) {
+        conf.textContent = `passage · ${r.questions.length} Q · ${r.confidence} confidence · ${r.language === 'bilingual' ? 'EN + HI' : r.language.toUpperCase()}`;
+        conf.classList.toggle('on', r.confidence === 'high');
+        conf.classList.toggle('off', r.confidence !== 'high');
+    }
+
+    // Everything renders into #qx-fields; the separate #qx-fields-hi panel is
+    // unused in passage mode (each question carries its own Hindi block).
+    fieldsHi.classList.add('hidden');
+    fieldsHi.innerHTML = '';
+
+    let html = qxPassageTextareasHtml(r);
+    r.questions.forEach((q, i) => {
+        html += `
+        <div class="qx-passage-q" data-qidx="${i}">
+            <p class="qx-passage-q-head">Question ${i + 1} of ${r.questions.length}</p>
+            ${qxFieldsHtml('en' + i, { question: q.question, options: q.options, correct: q.correct, explanation: q.explanation }, q.hi ? 'English' : '')}
+            ${q.hi ? qxFieldsHtml('hi' + i, { question: q.hi.question, options: q.hi.options, correct: q.correct, explanation: q.hi.explanation }, 'हिन्दी (Hindi)') : ''}
+        </div>`;
+    });
+    fields.innerHTML = html;
+
+    review.querySelectorAll('#qx-fields .rich-editor-wrap').forEach(w => buildRichEditor(w));
+    r.questions.forEach((q, i) => {
+        setReValue(`qx-en${i}-question`, q.question || '');
+        setReValue(`qx-en${i}-explanation`, q.explanation || '');
+        if (q.hi) {
+            setReValue(`qx-hi${i}-question`, q.hi.question || '');
+            setReValue(`qx-hi${i}-explanation`, q.hi.explanation || '');
+        }
+    });
+
+    qxWireOptionRows(review);
+
+    review.classList.remove('hidden');
+    qxSetReviewMode('preview');
     lucide.createIcons();
     try { review.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
 }
@@ -8361,9 +8578,14 @@ function qxSetReviewMode(mode) {
         b.classList.toggle('active', b.getAttribute('data-mode') === (preview ? 'preview' : 'editor')));
 
     if (preview) {
-        const en = qxCollectFields('en');
-        const hi = (qxState.result && qxState.result.hi) ? qxCollectFields('hi') : null;
-        prev.innerHTML = qxBuildPreviewHtml(en, hi);
+        const r = qxState.result;
+        if (r && r.type === 'passage') {
+            prev.innerHTML = qxBuildPassagePreviewHtml(r);
+        } else {
+            const en = qxCollectFields('en');
+            const hi = (r && r.hi) ? qxCollectFields('hi') : null;
+            prev.innerHTML = qxBuildPreviewHtml(en, hi);
+        }
         try { if (typeof renderKatex === 'function') prev.querySelectorAll('.qx-prev-katex').forEach(el => renderKatex(el)); } catch (e) {}
         prev.classList.remove('hidden');
         fields.classList.add('hidden');
@@ -8409,6 +8631,41 @@ function qxBuildPreviewHtml(en, hi) {
         + (hi ? '<div class="qx-prev-divider"></div>' + qxPreviewSection(hi, 'हिन्दी (Hindi)') : '');
 }
 
+// Passage-group preview: passage box (directions + body, exactly how the quiz
+// frontend shows the passage above its questions) followed by every question.
+function qxBuildPassagePreviewHtml(r) {
+    const pv = qxCollectPassageFields();
+    const nl2br = s => qxEsc(s).replace(/\n/g, '<br>');
+    const passageBlock = (dir, body, langLabel) => `
+        <div class="qx-prev-passage">
+            ${langLabel ? `<p class="qx-prev-langlabel">${langLabel}</p>` : ''}
+            ${dir ? `<p class="qx-prev-passage-dir">${nl2br(dir)}</p>` : ''}
+            <div class="qx-prev-passage-body">${nl2br(body) || '<span class="text-gray-400">(empty passage)</span>'}</div>
+        </div>`;
+    let html = passageBlock(pv.directions, pv.content, pv.bilingual ? 'English' : '');
+    if (pv.bilingual) html += passageBlock(pv.directionsHi, pv.contentHi, 'हिन्दी (Hindi)');
+    (r.questions || []).forEach((q, i) => {
+        const en = qxCollectFields('en' + i);
+        const hi = q.hi ? qxCollectFields('hi' + i) : null;
+        html += `<div class="qx-prev-divider"></div><p class="qx-prev-qnum">Question ${i + 1}</p>` + qxBuildPreviewHtml(en, hi);
+    });
+    return html;
+}
+
+// Read the passage textareas back (current, possibly edited values).
+function qxCollectPassageFields() {
+    const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+    const r = qxState.result || {};
+    const bilingual = r.language === 'bilingual';
+    return {
+        bilingual,
+        directions: val('qx-passage-dir-en'),
+        content: val('qx-passage-body-en'),
+        directionsHi: bilingual ? val('qx-passage-dir-hi') : '',
+        contentHi: bilingual ? val('qx-passage-body-hi') : '',
+    };
+}
+
 function qxCollectFields(prefix) {
     if (!reRegistry[`qx-${prefix}-question`]) return null;   // fields not built
     const rows = document.querySelectorAll(`#qx-${prefix}-opts .qx-opt-row`);
@@ -8436,6 +8693,7 @@ function qxNowStr() {
 async function qxSaveToBank() {
     const r = qxState.result;
     if (!r) return;
+    if (r.type === 'passage') { await qxSavePassageToBank(); return; }
     const en = qxCollectFields('en');
     if (!en || !en.question) { showToast('Question empty', 'The question text cannot be empty.', 'error'); return; }
     const cleanOpts = en.options.filter(o => o !== '');
@@ -8497,6 +8755,125 @@ async function qxSaveToBank() {
     }
 }
 
+// Save a whole passage group: one `passage` post + one linked `question` post
+// per question, exactly in the aimcq passage format (the same shape the
+// Question Editor imports/exports):
+//   passage  → post_type "passage", passage text in post_title/post_content,
+//              display-title & Hindi-content passage meta keys
+//   question → _aimcq_is_passage_question:"yes", _aimcq_passage_id:"<id>"
+async function qxSavePassageToBank() {
+    const r = qxState.result;
+    if (!r || r.type !== 'passage') return;
+
+    const pv = qxCollectPassageFields();
+    if (!pv.content) { showToast('Passage empty', 'The passage text cannot be empty.', 'error'); return; }
+
+    // Collect + validate every question before saving anything.
+    const collected = [];
+    for (let i = 0; i < r.questions.length; i++) {
+        const en = qxCollectFields('en' + i);
+        if (!en || !en.question) { showToast(`Question ${i + 1} empty`, 'Its question text cannot be empty.', 'error'); return; }
+        const cleanOpts = en.options.filter(o => o !== '');
+        if (cleanOpts.length < 2) { showToast(`Question ${i + 1} options missing`, 'At least 2 non-empty options are required.', 'error'); return; }
+        if (en.correct >= en.options.length || en.options[en.correct] === '') en.correct = en.options.findIndex(o => o !== '');
+        const hi = r.questions[i].hi ? qxCollectFields('hi' + i) : null;
+        collected.push({ en, hi });
+    }
+
+    const isHiOnly = r.language === 'hi';
+    const bilingual = r.language === 'bilingual';
+    const now = qxNowStr();
+    const created = new Date().toISOString();
+    const passageId = Date.now();
+    const saveLib = (document.getElementById('qx-save-lib') || {}).value || qxLibSelection().save || QX_LIB_DEFAULT;
+    const recLang = isHiOnly ? 'hi' : (bilingual ? 'bilingual' : 'en');
+
+    // ---- passage post (matches the standard aimcq passage shape) ----
+    const passagePost = {
+        id: passageId,
+        post_author: 1,
+        post_date: now,
+        post_title: pv.directions || stripHtmlTags(pv.content).slice(0, 120),
+        post_content: pv.content,
+        post_status: 'publish',
+        post_type: 'passage',
+        meta_input: {
+            _aimcq_passage_content_hi: bilingual ? pv.contentHi : '',
+            _aimcq_passage_translation_custom_prompt: '',
+            _aimcq_passage_display_title_en: pv.directions || '',
+            _aimcq_passage_display_title_hi: bilingual ? pv.directionsHi : '',
+            _aimcq_explanation: '',
+        },
+        taxonomies: [],
+        embedded_media: [],
+    };
+
+    // ---- question posts, linked to the passage ----
+    const questionRecs = collected.map((c, i) => {
+        const { en, hi } = c;
+        const meta = {
+            _aimcq_options: en.options.filter(o => o !== '').map(t => ({ text: t, image: '' })),
+            _aimcq_explanation: en.explanation,
+            _aimcq_is_passage_question: 'yes',
+            _aimcq_passage_id: String(passageId),
+            _aimcq_correct_answers: [Math.max(0, en.options.filter((o, j) => o !== '' && j <= en.correct).length - 1)],
+        };
+        if (hi && hi.question) {
+            meta._aimcq_title_hi = stripHtmlTags(hi.question).slice(0, 120);
+            meta._aimcq_question_content_hi = hi.question;
+            meta._aimcq_options_hi = hi.options.filter(o => o !== '').map(t => ({ text: t, image: '' }));
+            meta._aimcq_explanation_hi = hi.explanation;
+        }
+        const id = passageId + 1 + i;   // keeps export order: passage first, then its questions
+        return {
+            id,
+            created,
+            language: recLang,
+            thumb: i === 0 ? (qxState.cropThumb || '') : '',
+            library: saveLib,
+            passageId,
+            post: {
+                id,
+                post_author: 1,
+                post_date: now,
+                post_title: stripHtmlTags(en.question).slice(0, 120) || `Passage question ${i + 1}`,
+                post_content: en.question,
+                post_status: 'publish',
+                post_type: 'question',
+                meta_input: meta,
+                taxonomies: {},
+                embedded_media: [],
+            },
+        };
+    });
+
+    try {
+        await qxDbPut({
+            id: passageId,
+            created,
+            language: recLang,
+            thumb: qxState.cropThumb || '',
+            library: saveLib,
+            isPassage: true,
+            post: passagePost,
+        });
+        for (const rec of questionRecs) await qxDbPut(rec);
+    } catch (err) {
+        showToast('Save failed', 'IndexedDB error: ' + (err.message || err), 'error');
+        return;
+    }
+    { const sel = qxLibSelection(); sel.save = saveLib; qxLibSaveSelection(sel); }
+
+    qxState.result = null;
+    document.getElementById('qx-review').classList.add('hidden');
+    await qxRenderBank();
+    {
+        const libs = await qxLibEnsure();
+        const libName = (libs.find(l => l.id === saveLib) || {}).name || 'General';
+        showToast('Passage saved to Question Bank', `Passage + ${questionRecs.length} linked question${questionRecs.length === 1 ? '' : 's'} stored in "${libName}".`, 'success');
+    }
+}
+
 async function qxRenderBank() {
     const list = document.getElementById('qx-bank-list');
     const countChip = document.getElementById('qx-bank-count');
@@ -8549,14 +8926,20 @@ async function qxRenderBank() {
         const langBadge = rec.language === 'bilingual' ? 'EN+HI' : (rec.language || 'en').toUpperCase();
         const date = rec.created ? new Date(rec.created).toLocaleString() : '';
         const libBadge = sel.view === 'all' ? `<span class="qx-lib-badge">${qxEsc(libName(rec.library))}</span> · ` : '';
+        const isPassage = !!(rec.post && rec.post.post_type === 'passage');
+        const passageBadge = isPassage ? '<span class="qx-passage-badge">Passage</span> · '
+            : (rec.passageId ? '<span class="qx-passage-badge linked">Passage Q</span> · ' : '');
+        const detail = isPassage
+            ? `${recs.filter(x => String(x.passageId || '') === String(rec.id)).length} linked questions`
+            : `${(rec.post && rec.post.meta_input && rec.post.meta_input._aimcq_options || []).length} options`;
         return `
         <div class="qx-bank-row" data-id="${rec.id}">
             ${rec.thumb ? `<img src="${rec.thumb}" class="qx-bank-thumb" alt="">` : '<div class="qx-bank-thumb qx-bank-thumb-empty"><i data-lucide="file-question" class="w-4 h-4"></i></div>'}
             <div class="qx-bank-main">
                 <p class="qx-bank-title"><span class="qx-bank-num">${i + 1}.</span> ${title || '(untitled)'}</p>
-                <p class="qx-bank-sub">${libBadge}${langBadge} · ${(rec.post && rec.post.meta_input && rec.post.meta_input._aimcq_options || []).length} options · ${qxEsc(date)}</p>
+                <p class="qx-bank-sub">${libBadge}${passageBadge}${langBadge} · ${detail} · ${qxEsc(date)}</p>
             </div>
-            <button type="button" class="qx-bank-del" data-id="${rec.id}" title="Delete this question from the bank">
+            <button type="button" class="qx-bank-del" data-id="${rec.id}" title="Delete this ${isPassage ? 'passage (and its linked questions)' : 'question'} from the bank">
                 <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
             </button>
         </div>`;
@@ -8564,8 +8947,19 @@ async function qxRenderBank() {
 
     list.querySelectorAll('.qx-bank-del').forEach(b => b.addEventListener('click', async () => {
         const id = parseInt(b.getAttribute('data-id'), 10);
-        if (!window.confirm('Delete this question from the Question Bank? This cannot be undone.')) return;
-        try { await qxDbDelete(id); } catch (e) {}
+        const rec = recs.find(x => x.id === id);
+        const isPassage = !!(rec && rec.post && rec.post.post_type === 'passage');
+        if (isPassage) {
+            const linked = recs.filter(x => String(x.passageId || '') === String(id));
+            if (!window.confirm(`Delete this passage AND its ${linked.length} linked question${linked.length === 1 ? '' : 's'} from the Question Bank? This cannot be undone.`)) return;
+            try {
+                await qxDbDelete(id);
+                for (const l of linked) await qxDbDelete(l.id);
+            } catch (e) {}
+        } else {
+            if (!window.confirm('Delete this question from the Question Bank? This cannot be undone.')) return;
+            try { await qxDbDelete(id); } catch (e) {}
+        }
         qxRenderBank();
     }));
     lucide.createIcons();
@@ -8626,13 +9020,20 @@ async function qxExportBank() {
         library: sel.view === 'all' ? undefined : libName,
         terms: terms,
         posts: scoped.map(r => {
+            // Passage posts carry no taxonomy (standard shape: empty array);
+            // questions reference their library term.
+            if (r.post && r.post.post_type === 'passage') {
+                return Object.assign({}, r.post, { taxonomies: [] });
+            }
             const t = termByLib[r.library];
             return Object.assign({}, r.post, { taxonomies: { [t.taxonomy]: [t.slug] } });
         }),
     };
     if (data.library === undefined) delete data.library;
     downloadJSON(data, `question_bank_${slug}_${Date.now()}.json`);
-    showToast('Exported', `${scoped.length} question${scoped.length === 1 ? '' : 's'} from ${sel.view === 'all' ? 'all libraries' : `"${libName}"`} — standard question JSON.`, 'success');
+    const nPass = scoped.filter(r => r.post && r.post.post_type === 'passage').length;
+    const nQ = scoped.length - nPass;
+    showToast('Exported', `${nQ} question${nQ === 1 ? '' : 's'}${nPass ? ` + ${nPass} passage${nPass === 1 ? '' : 's'}` : ''} from ${sel.view === 'all' ? 'all libraries' : `"${libName}"`} — standard question JSON.`, 'success');
 }
 
 // ---------- boot / wiring ----------
@@ -8686,6 +9087,11 @@ async function qxExportBank() {
         document.getElementById('qx-extract-btn').addEventListener('click', qxExtract);
         const addCropBtn = document.getElementById('qx-add-crop-btn');
         if (addCropBtn) addCropBtn.addEventListener('click', qxAddCrop);
+        const passageToggle = document.getElementById('qx-passage');
+        if (passageToggle) passageToggle.addEventListener('change', () => {
+            const label = document.getElementById('qx-extract-label');
+            if (label && !qxState.busy) label.textContent = qxExtractBtnLabel();
+        });
         document.getElementById('qx-save-btn').addEventListener('click', qxSaveToBank);
         document.getElementById('qx-discard-btn').addEventListener('click', () => {
             qxState.result = null;
@@ -9171,8 +9577,8 @@ async function qxGeminiTranscribe(images) {
         const t = await transcribeOne(list[i]);
         parts.push(`--- Crop ${i + 1} of ${list.length} ---\n${(t || '').trim()}`);
     }
-    // The pieces belong to ONE question — flag that for the structuring step.
-    return 'The following transcription comes from MULTIPLE crops of the SAME question (it continues across crops, e.g. onto the next page, or repeats in another language). Treat all crops together as one single question.\n\n' + parts.join('\n\n');
+    // The pieces belong together — flag that for the structuring step.
+    return 'The following transcription comes from MULTIPLE crops of the SAME item (a single question, or a passage group with its questions, continuing across crops/pages — possibly repeated in another language). Treat all crops together as one continuous source.\n\n' + parts.join('\n\n');
 }
 
 async function qxRunExtraction(buildPrompt, langMode, images, wantSteps, detailLevel) {
@@ -9226,11 +9632,14 @@ function qxImgOpts(imgList) {
 }
 
 // For direct (non-split) multimodal calls there is no transcript to carry the
-// "these crops are one question" hint, so prepend it to the prompt instead.
+// "these crops belong together" hint, so prepend it to the prompt instead.
 function qxWithMultiHint(buildPrompt, langMode, wantSteps, detailLevel, multi) {
     const base = buildPrompt(langMode, undefined, wantSteps, detailLevel);
     if (!multi) return base;
-    return 'NOTE: You are given MULTIPLE images that are all crops of the SAME single question — it continues across the images (e.g. the question or its options continue on the next page, or the same question appears in another language). Combine ALL images into ONE question.\n\n' + base;
+    const hint = (buildPrompt === qxBuildPassagePrompt)
+        ? 'NOTE: You are given MULTIPLE images that are all crops of the SAME reading-comprehension group — together they contain the directions, the passage, and ALL its questions (continued across pages/columns). Combine ALL images into ONE passage group.\n\n'
+        : 'NOTE: You are given MULTIPLE images that are all crops of the SAME single question — it continues across the images (e.g. the question or its options continue on the next page, or the same question appears in another language). Combine ALL images into ONE question.\n\n';
+    return hint + base;
 }
 
 (function qxPoolBoot() {
