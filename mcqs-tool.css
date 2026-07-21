@@ -1229,6 +1229,37 @@
 }
 .qx-crop-queue-del:hover { background: #111827; }
 .qx-crop-queue-hint { font-size: 11px; color: #9f1239; margin-top: 8px; opacity: .85; }
+/* Multi-document tabs above the extractor canvas (e.g. EN PDF + HI PDF) */
+.qx-doc-tabs {
+    display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    padding: 6px 8px 0; background: #f3f4f6;
+    border-bottom: 1px solid #e5e7eb;
+}
+.qx-doc-tab {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600; color: #6b7280;
+    background: #e5e7eb; border: 1px solid #d1d5db; border-bottom: none;
+    border-radius: 8px 8px 0 0; padding: 5px 10px; cursor: pointer;
+    max-width: 220px; transition: background .12s, color .12s;
+}
+.qx-doc-tab:hover { background: #eef2f7; color: #374151; }
+.qx-doc-tab.active {
+    background: #fff; color: #be123c; border-color: #e5e7eb;
+    position: relative; top: 1px; box-shadow: 0 -1px 2px rgba(0,0,0,.04);
+}
+.qx-doc-tab-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;
+}
+.qx-doc-tab-close {
+    font-size: 14px; line-height: 1; color: #9ca3af; border-radius: 9999px;
+    width: 16px; height: 16px; display: inline-flex; align-items: center;
+    justify-content: center; flex-shrink: 0;
+}
+.qx-doc-tab-close:hover { background: #fecdd3; color: #be123c; }
+.qx-doc-tab.add {
+    background: transparent; border-style: dashed; color: #9ca3af;
+}
+.qx-doc-tab.add:hover { color: #be123c; border-color: #fda4af; background: #fff1f2; }
 /* Passage mode: review + bank + preview */
 .qx-passage-box {
     border: 1px solid #fbcfe8; background: #fdf2f8; border-radius: 12px;
